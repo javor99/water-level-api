@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "water_level_server_with_municipalities.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "water_level_server_with_municipalities.py"
+    }
+  ],
+  "env": {
+    "FLASK_DEBUG": "0",
+    "FLASK_ENV": "production"
+  }
+}

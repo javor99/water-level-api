@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+water_levels.db
+
+# Logs
+*.log
+server.log
+background_scheduler.log
+server_output.log
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment
+.vercel/
+.railway/
+
+# Large files
+*.zip
+*.tar.gz
+ngrok*
+ngrok.log
+
+# Backup files
+*.backup
+*.backup2
+*.backup3
+*.backup4
+*.backup_fix
+*.backup_subscription
+
+# Temporary files
+url
