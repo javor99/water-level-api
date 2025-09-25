@@ -8,6 +8,7 @@ Includes user registration, login, and role-based access control
 """
 
 import os
+import logging
 import sqlite3
 import json
 import bcrypt
@@ -19,6 +20,18 @@ from background_scheduler import start_background_scheduler
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('server.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
 from email_service import send_water_level_alert, send_subscription_confirmation
 import requests
 from pyproj import Transformer
@@ -162,7 +175,7 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     """Verify a password against its hash."""
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    return bcrypt.checkpw(password.encode('utf-8'), hashed)
 
 def generate_jwt_token(user_id: int, email: str, role: str) -> str:
     """Generate a JWT token for the user."""
@@ -660,6 +673,7 @@ def get_municipality(municipality_id):
 @app.route("/municipalities", methods=["POST"])
 def create_municipality():
     """Create a new municipality (superadmin only)."""
+    logger.info("Municipality creation request received")
     try:
         data = request.get_json()
         
@@ -691,10 +705,11 @@ def create_municipality():
         
         cursor.execute("""
             INSERT INTO municipalities 
-            (name, region, population, area_km2, description, created_by, updated_by)
+            (name, region, population, area_km2, description, created_by, updated_by, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (name, region, population, area_km2, description, 
-              get_user_email_from_jwt(), get_user_email_from_jwt()))
+              get_user_email_from_jwt(), get_user_email_from_jwt(), 
+              datetime.now().isoformat(), datetime.now().isoformat()))
         
         municipality_id = cursor.lastrowid
         conn.commit()
@@ -714,6 +729,7 @@ def create_municipality():
         }), 201
         
     except Exception as e:
+        logger.error(f"Municipality creation failed: {str(e)}", exc_info=True)
         return jsonify({"error": f"Failed to create municipality: {str(e)}"}), 500
 
 @app.route("/municipalities/<int:municipality_id>", methods=["PUT"])
@@ -1080,6 +1096,7 @@ def get_stations():
 @require_role('superadmin')
 def create_station():
     """Create new station - superadmin required."""
+    logger.info("Station creation request received")
     try:
         data = request.get_json()
         
