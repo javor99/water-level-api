@@ -1103,7 +1103,7 @@ def create_station():
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
-        required_fields = ["station_id", "name"]
+        required_fields = ["station_id"]
         for field in required_fields:
             if field not in data:
                 return jsonify({"error": f"Missing required field: {field}"}), 400
@@ -1116,8 +1116,7 @@ def create_station():
         station_owner = data.get("station_owner", "").strip()
         municipality_id = data.get("municipality_id")
         
-        if not station_id or not name:
-            return jsonify({"error": "Station ID and name cannot be empty"}), 400
+      
         
         conn = get_db_connection()
         cursor = conn.cursor()
