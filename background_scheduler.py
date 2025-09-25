@@ -137,10 +137,12 @@ def update_current_water_level_for_station(station_id: str, station_name: str):
         # Insert or update current water level
         cursor.execute("""
             INSERT OR REPLACE INTO water_levels 
-            (station_id, water_level_cm, water_level_m, measurement_date, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            (station_id, level_cm, timestamp, water_level_cm, water_level_m, measurement_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             station_id,
+            latest_measurement['water_level_cm'],
+            latest_measurement['measurement_date'],
             latest_measurement['water_level_cm'],
             latest_measurement['water_level_m'],
             latest_measurement['measurement_date'],

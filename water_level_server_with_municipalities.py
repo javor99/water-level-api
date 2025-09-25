@@ -251,7 +251,7 @@ def validate_station_exists_in_vandah(station_id):
                     return {
                         'exists': True,
                         'metadata': {
-                            'name': s['name'],
+                            'name': s.get('name', ''),
                             'latitude': lat,
                             'longitude': lon,
                             'location_type': s['locationType'].lower(),
@@ -685,7 +685,7 @@ def create_municipality():
             if field not in data:
                 return jsonify({"error": f"Missing required field: {field}"}), 400
         
-        name = data["name"].strip()
+        name = data.get("name", "").strip()
         region = data.get("region", "").strip()
         population = data.get("population")
         area_km2 = data.get("area_km2")
@@ -1109,7 +1109,7 @@ def create_station():
                 return jsonify({"error": f"Missing required field: {field}"}), 400
         
         station_id = data["station_id"].strip()
-        name = data["name"].strip()
+        name = data.get("name", "").strip()
         latitude = data.get("latitude")
         longitude = data.get("longitude")
         location_type = data.get("location_type", "stream").strip()
@@ -1141,15 +1141,15 @@ def create_station():
         if vandah_metadata:
             # Optionally use Vandah data to fill missing fields
             if not name:
-                name = vandah_metadata['name']
+                name = vandah_metadata.get('name', '')
             if not latitude:
-                latitude = vandah_metadata['latitude']
+                latitude = vandah_metadata.get('latitude')
             if not longitude:
-                longitude = vandah_metadata['longitude']
+                longitude = vandah_metadata.get('longitude')
             if not location_type or location_type == "stream":
-                location_type = vandah_metadata['location_type']
+                location_type = vandah_metadata.get('location_type', 'stream')
             if not station_owner:
-                station_owner = vandah_metadata['station_owner']
+                station_owner = vandah_metadata.get('station_owner', '')
         creator_email = get_user_email_from_jwt()
         # Insert the new station
         cursor.execute("""
