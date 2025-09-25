@@ -175,7 +175,7 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     """Verify a password against its hash."""
-    return bcrypt.checkpw(password.encode('utf-8'), hashed)
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 def generate_jwt_token(user_id: int, email: str, role: str) -> str:
     """Generate a JWT token for the user."""
