@@ -54,7 +54,7 @@ def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
     
     try:
         r = requests.get(url, params=params, timeout=30)
-        r.raise_for_status()
+        r._for_status()
         raw = r.json()
 
         if not raw or not raw[0].get("results"):
@@ -63,10 +63,10 @@ def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
         recs = raw[0]["results"]
         df = pd.DataFrame({
             "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
-            "water_level_cm": [rr["result"] for rr in recs],
+            "level_cm": [rr["result"] for rr in recs],
         })
         df["date"] = df["dt"].dt.date
-        daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
+        daily = df.groupby("date", as_index=False)["level_cm"].mean()
         return daily
         
     except Exception as e:
@@ -77,7 +77,7 @@ def update_30_day_history_for_station(station_id: str, station_name: str):
     """Update 30-day historical data for a single station."""
     try:
         # Fetch water data for last 30 days
-        water_data = fetch_water_daily(station_id, 30)
+        water_data = fetch_water_daily(station_id, 40)
         
         if water_data.empty:
             return False
@@ -93,13 +93,13 @@ def update_30_day_history_for_station(station_id: str, station_name: str):
         for _, row in water_data.iterrows():
             cursor.execute("""
                 INSERT INTO last_30_days_historical 
-                (station_id, measurement_date, water_level_cm, water_level_m, created_at)
+                (station_id, timestamp, level_cm, level_cm, created_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (
                 station_id,
                 row['date'],
-                row['water_level_cm'],
-                row['water_level_cm'] / 100.0,  # Convert to meters
+                row['level_cm'],
+                row['level_cm'] / 100.0,  # Convert to meters
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             records_inserted += 1
@@ -121,10 +121,10 @@ def update_current_water_level_for_station(station_id: str, station_name: str):
         
         # Get the most recent measurement from 30-day history
         cursor.execute("""
-            SELECT water_level_cm, water_level_m, measurement_date
+            SELECT level_cm, level_cm, timestamp
             FROM last_30_days_historical 
             WHERE station_id = ? 
-            ORDER BY measurement_date DESC 
+            ORDER BY timestamp DESC 
             LIMIT 1
         """, (station_id,))
         
@@ -137,15 +137,15 @@ def update_current_water_level_for_station(station_id: str, station_name: str):
         # Insert or update current water level
         cursor.execute("""
             INSERT OR REPLACE INTO water_levels 
-            (station_id, level_cm, timestamp, water_level_cm, water_level_m, measurement_date, created_at)
+            (station_id, level_cm, timestamp, level_cm, level_cm, timestamp, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             station_id,
-            latest_measurement['water_level_cm'],
-            latest_measurement['measurement_date'],
-            latest_measurement['water_level_cm'],
-            latest_measurement['water_level_m'],
-            latest_measurement['measurement_date'],
+            latest_measurement['level_cm'],
+            latest_measurement['timestamp'],
+            latest_measurement['level_cm'],
+            latest_measurement['level_cm'],
+            latest_measurement['timestamp'],
             datetime.now().isoformat()
         ))
         
@@ -160,7 +160,13 @@ def update_current_water_level_for_station(station_id: str, station_name: str):
 
 def update_predictions_for_station(station_id: str, station_name: str, latitude: float, longitude: float):
     """Update predictions for a single station."""
+    print(f"    🔍🔍🔍 STARTING PREDICTIONS FOR {station_id} 🔍🔍🔍")
     try:
+        print(f"    🔍 Station ID: {station_id}")
+        print(f"    🔍 Station Name: {station_name}")
+        print(f"    🔍 Latitude: {latitude}")
+        print(f"    🔍 Longitude: {longitude}")
+        
         # Run the prediction script
         cmd = [
             'python3', 'predict_unseen_station.py',
@@ -169,54 +175,94 @@ def update_predictions_for_station(station_id: str, station_name: str, latitude:
             '--lon', str(longitude),
             '--unseen_strategy', 'nearest',
             '--anchor', 'none',
-            '--past_days', '60'
+            '--past_days', '40'
         ]
+        
+        print(f"    🔍 Command: {' '.join(cmd)}")
+        print(f"    🔍 Running prediction script...")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
+        print(f"    🔍 Return code: {result.returncode}")
+        print(f"    🔍 Stdout length: {len(result.stdout)}")
+        print(f"    🔍 Stderr length: {len(result.stderr)}")
+        
+        if result.stdout:
+            print(f"    🔍 Stdout: {result.stdout[:500]}...")
+        if result.stderr:
+            print(f"    🔍 Stderr: {result.stderr[:500]}...")
+        
         if result.returncode == 0:
+            print(f"    🔍 Prediction script succeeded!")
             # Save predictions to database
             csv_path = f'predictions/predictions_{station_id}_unseen.csv'
+            print(f"    🔍 Looking for CSV: {csv_path}")
             
             if os.path.exists(csv_path):
+                print(f"    🔍 CSV exists! Reading data...")
                 df = pd.read_csv(csv_path)
+                print(f"    🔍 CSV shape: {df.shape}")
+                print(f"    🔍 CSV columns: {list(df.columns)}")
+                print(f"    🔍 First row: {dict(df.iloc[0]) if len(df) > 0 else 'No data'}")
                 
+                print(f"    🔍 Connecting to database...")
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
-                # Delete existing predictions for this station
+                print(f"    🔍 Deleting existing predictions...")
                 cursor.execute("DELETE FROM predictions WHERE station_id = ?", (station_id,))
+                deleted_count = cursor.rowcount
+                print(f"    🔍 Deleted {deleted_count} existing predictions")
                 
                 # Insert new predictions
                 records_inserted = 0
-                for _, row in df.iterrows():
-                    cursor.execute("""
-                        INSERT INTO predictions
-                        (station_id, prediction_date, predicted_water_level_cm, predicted_water_level_m,
-                         change_from_last_cm, forecast_date, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        station_id,
-                        row['date'],
-                        row['predicted_water_level_cm'],
-                        row['predicted_water_level_m'],
-                        row['change_from_last_daily_mean_cm'],
-                        row['date'],
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    ))
-                    records_inserted += 1
+                print(f"    🔍 Inserting {len(df)} new predictions...")
                 
+                for i, (_, row) in enumerate(df.iterrows()):
+                    try:
+                        print(f"    🔍 Inserting row {i+1}/{len(df)}: {dict(row)}")
+                        cursor.execute("""
+                            INSERT INTO predictions
+                            (station_id, prediction_date, predicted_water_level_cm,
+                             change_from_last_cm, forecast_date, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            station_id,
+                            row['date'],
+                            row['predicted_water_level_cm'],
+                            row['change_from_last_daily_mean_cm'],
+                            row['date'],
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        ))
+                        records_inserted += 1
+                        print(f"    🔍 Row {i+1} inserted successfully")
+                    except Exception as insert_error:
+                        print(f"    ❌❌❌ ERROR INSERTING ROW {i+1}: {insert_error} ❌❌❌")
+                        print(f"    🔍 Row data: {dict(row)}")
+                        print(f"    🔍 Error type: {type(insert_error)}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                
+                print(f"    🔍 Committing transaction...")
                 conn.commit()
+                print(f"    🔍 Closing connection...")
                 conn.close()
+                print(f"    ✅✅✅ SUCCESS: Inserted {records_inserted} prediction records ✅✅✅")
                 
                 return True
             else:
+                print(f"    ❌❌❌ CSV FILE NOT FOUND: {csv_path} ❌❌❌")
                 return False
         else:
+            print(f"    ❌❌❌ PREDICTION SCRIPT FAILED WITH CODE {result.returncode} ❌❌❌")
             return False
             
     except Exception as e:
-        print(f"    ❌ Error updating predictions for {station_id}: {e}")
+        print(f"    ❌❌❌ EXCEPTION IN PREDICTIONS: {e} ❌❌❌")
+        print(f"    🔍 Exception type: {type(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def check_and_send_alerts_for_station(station_id: str, station_name: str):
@@ -227,7 +273,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         
         # Get the latest prediction for this station
         cursor.execute("""
-            SELECT predicted_water_level_m, prediction_date
+            SELECT predicted_level_cm, prediction_date
             FROM predictions 
             WHERE station_id = ? 
             ORDER BY prediction_date DESC 
@@ -240,11 +286,11 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
             conn.close()
             return False
         
-        current_prediction = latest_prediction['predicted_water_level_m']
+        current_prediction = latest_prediction['predicted_level_cm']
         
         # Get the maximum historical level for this station
         cursor.execute("""
-            SELECT MAX(water_level_m) as max_level
+            SELECT MAX(level_cm) as max_level
             FROM last_30_days_historical 
             WHERE station_id = ?
         """, (station_id,))
@@ -398,4 +444,13 @@ def start_background_scheduler():
     print("🔄 First update cycle will start immediately...")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    print("🚀 Starting background scheduler...")
+    start_background_scheduler()
+    print("✅ Background scheduler started")
+    
+    # Keep the script running
+    try:
+        while True:
+            time.sleep(60)  # Sleep for 1 minute
+    except KeyboardInterrupt:
+        print("\n🛑 Background scheduler stopped")

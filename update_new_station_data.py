@@ -47,10 +47,10 @@ def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
         recs = raw[0]["results"]
         df = pd.DataFrame({
             "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
-            "water_level_cm": [rr["result"] for rr in recs],
+            "level_cm": [rr["result"] for rr in recs],
         })
         df["date"] = df["dt"].dt.date
-        daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
+        daily = df.groupby("date", as_index=False)["level_cm"].mean()
         return daily
         
     except Exception as e:
@@ -82,8 +82,8 @@ def fetch_historical_water_data(station_id: str, years_back: int = 5) -> list:
         if raw and raw[0].get("results"):
             for result in raw[0]["results"]:
                 all_data.append({
-                    'measurement_date': result['measurementDateTime'][:10],  # YYYY-MM-DD
-                    'water_level_cm': result['result']
+                    'timestamp': result['measurementDateTime'][:10],  # YYYY-MM-DD
+                    'level_cm': result['result']
                 })
             print(f"    ✅ Fetched {len(all_data)} records")
         else:
@@ -101,7 +101,7 @@ def update_30_day_history(station_id: str, station_name: str):
     
     try:
         # Fetch water data for last 30 days
-        water_data = fetch_water_daily(station_id, 30)
+        water_data = fetch_water_daily(station_id, 40)
         
         if water_data.empty:
             print(f"  ⚠️  No water data available for 30-day history")
@@ -118,13 +118,13 @@ def update_30_day_history(station_id: str, station_name: str):
         for _, row in water_data.iterrows():
             cursor.execute("""
                 INSERT INTO last_30_days_historical 
-                (station_id, measurement_date, water_level_cm, water_level_m, created_at)
+                (station_id, timestamp, level_cm, level_cm, created_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (
                 station_id,
                 row['date'],
-                row['water_level_cm'],
-                row['water_level_cm'] / 100.0,  # Convert to meters
+                row['level_cm'],
+                row['level_cm'] / 100.0,  # Convert to meters
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             records_inserted += 1
@@ -152,31 +152,31 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
             return False
         
         # Calculate min/max from historical data
-        water_levels = [record['water_level_cm'] for record in historical_data]
-        min_level_cm = min(water_levels)
-        max_level_cm = max(water_levels)
-        min_level_m = min_level_cm / 100.0
-        max_level_m = max_level_cm / 100.0
+        water_levels = [record['level_cm'] for record in historical_data]
+        last_30_days_min_cm = min(water_levels)
+        last_30_days_max_cm = max(water_levels)
+        min_level_cm = last_30_days_min_cm / 100.0
+        max_level_cm = last_30_days_max_cm / 100.0
         
         # Calculate 30-day min/max
         thirty_days_ago = datetime.now() - timedelta(days=30)
         recent_data = [
             record for record in historical_data 
-            if datetime.strptime(record['measurement_date'], '%Y-%m-%d') >= thirty_days_ago
+            if datetime.strptime(record['timestamp'], '%Y-%m-%d') >= thirty_days_ago
         ]
         
         if recent_data:
-            recent_levels = [record['water_level_cm'] for record in recent_data]
+            recent_levels = [record['level_cm'] for record in recent_data]
             last_30_days_min_cm = min(recent_levels)
             last_30_days_max_cm = max(recent_levels)
             last_30_days_min_m = last_30_days_min_cm / 100.0
             last_30_days_max_m = last_30_days_max_cm / 100.0
         else:
             # Fallback to overall min/max if no recent data
-            last_30_days_min_cm = min_level_cm
-            last_30_days_max_cm = max_level_cm
-            last_30_days_min_m = min_level_m
-            last_30_days_max_m = max_level_m
+            last_30_days_min_cm = last_30_days_min_cm
+            last_30_days_max_cm = last_30_days_max_cm
+            last_30_days_min_m = min_level_cm
+            last_30_days_max_m = max_level_cm
         
         # Update database
         conn = get_db_connection()
@@ -184,12 +184,10 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
         
         cursor.execute("""
             UPDATE stations 
-            SET min_level_cm = ?, max_level_cm = ?, min_level_m = ?, max_level_m = ?,
-                last_30_days_min_cm = ?, last_30_days_max_cm = ?, 
+            SET last_30_days_min_cm = ?, last_30_days_max_cm = ?, 
                 last_30_days_min_m = ?, last_30_days_max_m = ?
             WHERE station_id = ?
         """, (
-            min_level_cm, max_level_cm, min_level_m, max_level_m,
             last_30_days_min_cm, last_30_days_max_cm,
             last_30_days_min_m, last_30_days_max_m,
             station_id
@@ -199,7 +197,7 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
         conn.close()
         
         print(f"  ✅ Updated min/max values:")
-        print(f"    Historical: {min_level_cm:.2f} - {max_level_cm:.2f} cm")
+        print(f"    Historical: {last_30_days_min_cm:.2f} - {last_30_days_max_cm:.2f} cm")
         print(f"    30-day: {last_30_days_min_cm:.2f} - {last_30_days_max_cm:.2f} cm")
         return True
         
@@ -212,57 +210,41 @@ def run_predictions(station_id: str, station_name: str, latitude: float, longitu
     print(f"🔮 Running predictions for {station_id} ({station_name})")
     
     try:
-        # Try different time windows
-        time_windows = [60, 90]
+        # Only try 40 days - no retry logic
+        past_days = 40
+        print(f"  📅 Trying {past_days} days of historical data...")
         
-        for past_days in time_windows:
-            print(f"  📅 Trying {past_days} days of historical data...")
+        # Run the prediction script
+        cmd = [
+            'python3', 'predict_unseen_station.py',
+            '--vandah_id', station_id,
+            '--lat', str(latitude),
+            '--lon', str(longitude),
+            '--unseen_strategy', 'nearest',
+            '--anchor', 'none',
+            '--past_days', str(past_days)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print(f"  ✅ Predictions generated successfully with {past_days} days of data")
             
-            try:
-                # Run the prediction script
-                cmd = [
-                    'python3', 'predict_unseen_station.py',
-                    '--vandah_id', station_id,
-                    '--lat', str(latitude),
-                    '--lon', str(longitude),
-                    '--unseen_strategy', 'nearest',
-                    '--anchor', 'none',
-                    '--past_days', str(past_days)
-                ]
-                
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                
-                if result.returncode == 0:
-                    print(f"  ✅ Predictions generated successfully with {past_days} days of data")
-                    
-                    # Save predictions to database
-                    if save_predictions_to_db(station_id):
-                        return True
-                    else:
-                        return False
-                else:
-                    # Check if it's a data insufficiency error
-                    error_msg = result.stderr.lower()
-                    if "not enough rows" in error_msg or "sequence" in error_msg:
-                        print(f"  ⚠️  Insufficient data with {past_days} days")
-                        if past_days == 90:  # This was our last attempt
-                            print(f"  ❌ Cannot generate predictions - insufficient data even with 90 days")
-                            return False
-                        else:
-                            print(f"  🔄 Trying with more historical data...")
-                            continue
-                    else:
-                        print(f"  ❌ Prediction failed: {result.stderr}")
-                        return False
-                        
-            except subprocess.TimeoutExpired:
-                print(f"  ⏰ Prediction timed out for station {station_id}")
+            # Save predictions to database
+            if save_predictions_to_db(station_id):
+                return True
+            else:
                 return False
-            except Exception as e:
-                print(f"  ❌ Error running prediction: {e}")
+        else:
+            # Check if it's a data insufficiency error
+            error_msg = result.stderr.lower()
+            if "not enough rows" in error_msg or "sequence" in error_msg:
+                print(f"  ❌ Cannot generate predictions - insufficient consecutive data in last {past_days} days")
+                print(f"  📊 Need 40 consecutive days ending today for predictions")
                 return False
-        
-        return False
+            else:
+                print(f"  ❌ Prediction failed: {result.stderr}")
+                return False
         
     except Exception as e:
         print(f"  ❌ Error in prediction process: {e}")
@@ -291,14 +273,13 @@ def save_predictions_to_db(station_id: str):
         for _, row in df.iterrows():
             cursor.execute("""
                 INSERT INTO predictions
-                (station_id, prediction_date, predicted_water_level_cm, predicted_water_level_m,
+                (station_id, prediction_date, predicted_water_level_cm,
                  change_from_last_cm, forecast_date, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 station_id,
                 row['date'],  # CSV has 'date' column
-                row['predicted_water_level_cm'],
-                row['predicted_water_level_m'],
+                row['predicted_water_level_cm'],  # CSV has this column name
                 row['change_from_last_daily_mean_cm'],  # CSV has this column name
                 row['date'],  # Use same date for forecast_date
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -340,10 +321,10 @@ def update_current_water_level(station_id: str, station_name: str) -> bool:
         
         # Get the most recent measurement from 30-day history
         cursor.execute("""
-            SELECT water_level_cm, water_level_m, measurement_date
+            SELECT level_cm, level_cm, timestamp
             FROM last_30_days_historical 
             WHERE station_id = ? 
-            ORDER BY measurement_date DESC 
+            ORDER BY timestamp DESC 
             LIMIT 1
         """, (station_id,))
         
@@ -357,20 +338,20 @@ def update_current_water_level(station_id: str, station_name: str) -> bool:
         # Insert or update current water level
         cursor.execute("""
             INSERT OR REPLACE INTO water_levels 
-            (station_id, water_level_cm, water_level_m, measurement_date, created_at)
+            (station_id, level_cm, level_cm, timestamp, created_at)
             VALUES (?, ?, ?, ?, ?)
         """, (
             station_id,
-            latest_measurement['water_level_cm'],
-            latest_measurement['water_level_m'],
-            latest_measurement['measurement_date'],
+            latest_measurement['level_cm'],
+            latest_measurement['level_cm'],
+            latest_measurement['timestamp'],
             datetime.now().isoformat()
         ))
         
         conn.commit()
         conn.close()
         
-        print(f"    ✅ Current water level updated: {latest_measurement['water_level_cm']:.2f} cm ({latest_measurement['measurement_date']})")
+        print(f"    ✅ Current water level updated: {latest_measurement['level_cm']:.2f} cm ({latest_measurement['timestamp']})")
         return True
         
     except Exception as e:
@@ -448,11 +429,13 @@ def update_new_station_data(station_id: str):
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT s.station_id, s.name, s.min_level_cm, s.max_level_cm, 
+        SELECT s.station_id, s.name, 
                s.last_30_days_min_cm, s.last_30_days_max_cm,
+               mm.min_level_cm, mm.max_level_cm,
                COUNT(h.station_id) as history_count,
                COUNT(p.station_id) as prediction_count
         FROM stations s
+        LEFT JOIN min_max_values mm ON s.station_id = mm.station_id
         LEFT JOIN last_30_days_historical h ON s.station_id = h.station_id
         LEFT JOIN predictions p ON s.station_id = p.station_id
         WHERE s.station_id = ?
@@ -465,8 +448,13 @@ def update_new_station_data(station_id: str):
     if station_data:
         print("Final Station Data:")
         print(f"  Station: {station_data['name']}")
-        print(f"  Historical min/max: {station_data['min_level_cm']:.2f} - {station_data['max_level_cm']:.2f} cm")
-        print(f"  30-day min/max: {station_data['last_30_days_min_cm']:.2f} - {station_data['last_30_days_max_cm']:.2f} cm")
+        min_level = station_data['last_30_days_min_cm'] if station_data['last_30_days_min_cm'] is not None else 0
+        max_level = station_data['last_30_days_max_cm'] if station_data['last_30_days_max_cm'] is not None else 0
+        last_30_min = station_data['last_30_days_min_cm'] if station_data['last_30_days_min_cm'] is not None else 0
+        last_30_max = station_data['last_30_days_max_cm'] if station_data['last_30_days_max_cm'] is not None else 0
+        
+        print(f"  Historical min/max: {min_level:.2f} - {max_level:.2f} cm")
+        print(f"  30-day min/max: {last_30_min:.2f} - {last_30_max:.2f} cm")
         print(f"  Historical records: {station_data['history_count']}")
         print(f"  Prediction records: {station_data['prediction_count']}")
     

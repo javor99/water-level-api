@@ -1161,8 +1161,34 @@ def create_station():
         conn.commit()
         conn.close()
         
+        # Run data update synchronously and wait for completion
+        print(f"🔄 Starting automatic data generation for station {station_id}...")
+        try:
+            import subprocess
+            result = subprocess.run([
+                'python3', 'update_new_station_data.py', station_id
+            ], capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0:
+                print(f"✅ Automatic data generation completed for station {station_id}")
+                data_update_status = "completed"
+                data_update_message = "30-day history, min/max values, and predictions have been generated successfully"
+            else:
+                print(f"❌ Automatic data generation failed for station {station_id}: {result.stderr}")
+                data_update_status = "failed"
+                data_update_message = f"Data generation failed: {result.stderr}"
+                
+        except subprocess.TimeoutExpired:
+            print(f"⏰ Automatic data generation timed out for station {station_id}")
+            data_update_status = "timeout"
+            data_update_message = "Data generation timed out after 5 minutes"
+        except Exception as e:
+            print(f"❌ Error during automatic data generation for station {station_id}: {str(e)}")
+            data_update_status = "error"
+            data_update_message = f"Data generation error: {str(e)}"
+        
         return jsonify({
-            "message": "Station created successfully. Data update started in background.",
+            "message": "Station created successfully. Data generation completed.",
             "station": {
                 "station_id": station_id,
                 "name": name,
@@ -1174,8 +1200,8 @@ def create_station():
                 "created_by": creator_email
             },
             "data_update": {
-                "status": "started",
-                "message": "30-day history, min/max values, and predictions are being updated in the background"
+                "status": data_update_status,
+                "message": data_update_message
             }
         }), 201
         
@@ -1452,25 +1478,47 @@ def get_station_minmax(station_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT s.station_id, s.name, s.min_level_cm, s.max_level_cm, s.min_level_m, s.max_level_m
-            FROM stations s LEFT JOIN municipalities m ON s.municipality_id = m.id 
-            WHERE s.station_id = ?
-        """, (station_id,))
-        
+        # First check if station exists
+        cursor.execute("SELECT station_id, name FROM stations WHERE station_id = ?", (station_id,))
         station = cursor.fetchone()
-        conn.close()
         
         if not station:
+            conn.close()
             return jsonify({"error": f"Station {station_id} not found"}), 404
+        
+        # Get min/max values from min_max_values table
+        cursor.execute("""
+            SELECT min_level_cm, max_level_cm, updated_at
+            FROM min_max_values 
+            WHERE station_id = ?
+        """, (station_id,))
+        
+        minmax_data = cursor.fetchone()
+        conn.close()
+        
+        if not minmax_data:
+            return jsonify({
+                "station_id": station[0],
+                "station_name": station[1],
+                "min_level_cm": None,
+                "max_level_cm": None,
+                "min_level_m": None,
+                "max_level_m": None,
+                "updated_at": None
+            }), 200
+        
+        min_level_cm = minmax_data[0]
+        max_level_cm = minmax_data[1]
+        updated_at = minmax_data[2]
         
         return jsonify({
             "station_id": station[0],
             "station_name": station[1],
-            "min_level_cm": station[2],
-            "max_level_cm": station[3],
-            "min_level_m": station[4],
-            "max_level_m": station[5]
+            "min_level_cm": min_level_cm,
+            "max_level_cm": max_level_cm,
+            "min_level_m": min_level_cm / 100.0 if min_level_cm else None,
+            "max_level_m": max_level_cm / 100.0 if max_level_cm else None,
+            "updated_at": updated_at
         }), 200
         
     except Exception as e:
@@ -1512,11 +1560,11 @@ def update_station_minmax(station_id):
             conn.close()
             return jsonify({"error": f"Station {station_id} not found"}), 404
         
+        # Insert or update min/max values in min_max_values table
         cursor.execute("""
-            UPDATE stations 
-            SET min_level_cm = ?, max_level_cm = ?, min_level_m = ?, max_level_m = ?
-            WHERE station_id = ?
-        """, (min_level_cm, max_level_cm, min_level_m, max_level_m, station_id))
+            INSERT OR REPLACE INTO min_max_values (station_id, min_level_cm, max_level_cm, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        """, (station_id, min_level_cm, max_level_cm))
         
         conn.commit()
         conn.close()
