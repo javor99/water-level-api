@@ -1109,11 +1109,11 @@ def create_station():
                 return jsonify({"error": f"Missing required field: {field}"}), 400
         
         station_id = data["station_id"].strip()
-        name = data.get("name", "").strip()
+        name = data.get("name", "")
         latitude = data.get("latitude")
         longitude = data.get("longitude")
-        location_type = data.get("location_type", "stream").strip()
-        station_owner = data.get("station_owner", "").strip()
+        location_type = data.get("location_type", "stream")
+        station_owner = data.get("station_owner", "")
         municipality_id = data.get("municipality_id")
         
       
@@ -1139,18 +1139,16 @@ def create_station():
         # Use Vandah metadata if available (optional - you can still use provided data)
         vandah_metadata = vandah_validation['metadata']
         if vandah_metadata:
-            # Optionally use Vandah data to fill missing fields
-            if not name:
-                name = vandah_metadata.get('name', '')
-            if not latitude:
-                latitude = vandah_metadata.get('latitude')
-            if not longitude:
-                longitude = vandah_metadata.get('longitude')
-            if not location_type or location_type == "stream":
-                location_type = vandah_metadata.get('location_type', 'stream')
-            if not station_owner:
-                station_owner = vandah_metadata.get('station_owner', '')
+            # Use Vandah data to fill all fields
+            name = vandah_metadata.get('name', name)
+            latitude = vandah_metadata.get('latitude', latitude)
+            longitude = vandah_metadata.get('longitude', longitude)
+            location_type = vandah_metadata.get('location_type', location_type)
+            station_owner = vandah_metadata.get('station_owner', station_owner)
+            description = vandah_metadata.get('description', '')
+        
         creator_email = get_user_email_from_jwt()
+        
         # Insert the new station
         cursor.execute("""
             INSERT INTO stations 
@@ -1161,34 +1159,39 @@ def create_station():
         conn.commit()
         conn.close()
         
-        # Run data update synchronously and wait for completion
-        print(f"🔄 Starting automatic data generation for station {station_id}...")
+        # Start background data generation (non-blocking)
+        print(f"🔄 Starting background data generation for station {station_id}...")
         try:
             import subprocess
-            result = subprocess.run([
-                'python3', 'update_new_station_data.py', station_id
-            ], capture_output=True, text=True, timeout=300)
+            import threading
             
-            if result.returncode == 0:
-                print(f"✅ Automatic data generation completed for station {station_id}")
-                data_update_status = "completed"
-                data_update_message = "30-day history, min/max values, and predictions have been generated successfully"
-            else:
-                print(f"❌ Automatic data generation failed for station {station_id}: {result.stderr}")
-                data_update_status = "failed"
-                data_update_message = f"Data generation failed: {result.stderr}"
-                
-        except subprocess.TimeoutExpired:
-            print(f"⏰ Automatic data generation timed out for station {station_id}")
-            data_update_status = "timeout"
-            data_update_message = "Data generation timed out after 5 minutes"
+            def run_data_update():
+                try:
+                    result = subprocess.run([
+                        'python3', 'update_new_station_data.py', station_id
+                    ], capture_output=True, text=True, timeout=300)
+                    
+                    if result.returncode == 0:
+                        print(f"✅ Background data generation completed for station {station_id}")
+                    else:
+                        print(f"❌ Background data generation failed for station {station_id}: {result.stderr}")
+                        
+                except subprocess.TimeoutExpired:
+                    print(f"⏰ Background data generation timed out for station {station_id}")
+                except Exception as e:
+                    print(f"❌ Error during background data generation for station {station_id}: {str(e)}")
+            
+            # Start background thread
+            thread = threading.Thread(target=run_data_update)
+            thread.daemon = True
+            thread.start()
+            
         except Exception as e:
-            print(f"❌ Error during automatic data generation for station {station_id}: {str(e)}")
-            data_update_status = "error"
-            data_update_message = f"Data generation error: {str(e)}"
+            print(f"❌ Error starting background data generation for station {station_id}: {str(e)}")
         
+        # Return immediately with Vandah metadata
         return jsonify({
-            "message": "Station created successfully. Data generation completed.",
+            "message": "Station created successfully with Vandah metadata. Data generation started in background.",
             "station": {
                 "station_id": station_id,
                 "name": name,
@@ -1197,11 +1200,13 @@ def create_station():
                 "location_type": location_type,
                 "station_owner": station_owner,
                 "municipality_id": municipality_id,
-                "created_by": creator_email
+                "created_by": creator_email,
+                "description": vandah_metadata.get('description', '') if vandah_metadata else ''
             },
+            "vandah_metadata": vandah_metadata if vandah_metadata else None,
             "data_update": {
-                "status": data_update_status,
-                "message": data_update_message
+                "status": "started",
+                "message": "Data generation is running in the background. This may take 1-3 minutes."
             }
         }), 201
         
@@ -1299,10 +1304,10 @@ def get_water_levels():
         
         # Try to get latest from last_30_days_historical first (most recent data)
         cursor.execute("""
-            SELECT water_level_cm, water_level_m, measurement_date, 'last_30_days_historical' as source
+            SELECT level_cm, level_cm/100 as water_level_m, timestamp as measurement_date, 'last_30_days_historical' as source
             FROM last_30_days_historical 
             WHERE station_id = ? 
-            ORDER BY measurement_date DESC 
+            ORDER BY timestamp DESC 
             LIMIT 1
         """, (station_id,))
         
@@ -1311,7 +1316,7 @@ def get_water_levels():
         # If no data in last_30_days_historical, try water_levels table
         if not latest:
             cursor.execute("""
-                SELECT water_level_cm, water_level_m, measurement_date, 'water_levels' as source
+                SELECT level_cm, level_cm/100 as water_level_m, timestamp as measurement_date, 'water_levels' as source
                 FROM water_levels 
                 WHERE station_id = ? 
                 ORDER BY created_at DESC 
@@ -1327,7 +1332,7 @@ def get_water_levels():
                 "latitude": station['latitude'],
                 "longitude": station['longitude'],
                 "measurement_date": latest['measurement_date'],
-                "water_level_cm": latest['water_level_cm'],
+                "water_level_cm": latest['level_cm'],
                 "water_level_m": latest['water_level_m'],
                 "data_source": latest['source'],
                 "weather_station_info": weather_info
@@ -1358,17 +1363,17 @@ def get_station_water_levels(station_id):
         return jsonify({"success": False, "error": "Station not found"}), 404
     
     cursor.execute("""
-        SELECT water_level_cm, water_level_m, measurement_date
+        SELECT level_cm, level_cm/100 as water_level_m, timestamp as measurement_date
         FROM last_30_days_historical
         WHERE station_id = ?
-        ORDER BY measurement_date DESC
+        ORDER BY timestamp DESC
     """, (station_id,))
     
     history = []
     for row in cursor.fetchall():
         history.append({
             "date": row['measurement_date'],
-            "water_level_cm": row['water_level_cm'],
+            "water_level_cm": row['level_cm'],
             "water_level_m": row['water_level_m']
         })
     weather_info = get_weather_station_info()
@@ -1391,7 +1396,7 @@ def get_predictions():
     
     cursor.execute("""
         SELECT p.station_id, s.name, s.latitude, s.longitude, p.prediction_date, p.predicted_water_level_cm, 
-               p.predicted_water_level_m, p.change_from_last_cm, p.forecast_date
+               p.predicted_water_level_cm/100 as predicted_water_level_m, p.change_from_last_cm, p.forecast_date
         FROM predictions p
         JOIN stations s ON p.station_id = s.station_id
         ORDER BY s.name, p.prediction_date
@@ -1408,7 +1413,7 @@ def get_predictions():
             "longitude": row['longitude'],
             "prediction_date": row['prediction_date'],
             "predicted_water_level_cm": row['predicted_water_level_cm'],
-            "predicted_water_level_m": row['predicted_water_level_m'],
+            "predicted_water_level_m": row['predicted_water_level_cm']/100 if row['predicted_water_level_cm'] is not None else None,
             "change_from_last_cm": row['change_from_last_cm'],
             "forecast_date": row['forecast_date'],
             "weather_station_info": weather_info
@@ -1442,7 +1447,7 @@ def get_station_predictions(station_id):
         return jsonify({"success": False, "error": "Station not found"}), 404
     
     cursor.execute("""
-        SELECT prediction_date, predicted_water_level_cm, predicted_water_level_m, 
+        SELECT prediction_date, predicted_water_level_cm, predicted_water_level_cm/100 as predicted_water_level_m, 
                change_from_last_cm, forecast_date
         FROM predictions
         WHERE station_id = ?
@@ -1454,7 +1459,7 @@ def get_station_predictions(station_id):
         predictions.append({
             "prediction_date": row['prediction_date'],
             "predicted_water_level_cm": row['predicted_water_level_cm'],
-            "predicted_water_level_m": row['predicted_water_level_m'],
+            "predicted_water_level_m": row['predicted_water_level_cm']/100 if row['predicted_water_level_cm'] is not None else None,
             "change_from_last_cm": row['change_from_last_cm'],
             "forecast_date": row['forecast_date']
         })

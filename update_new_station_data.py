@@ -153,10 +153,10 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
         
         # Calculate min/max from historical data
         water_levels = [record['level_cm'] for record in historical_data]
-        last_30_days_min_cm = min(water_levels)
-        last_30_days_max_cm = max(water_levels)
-        min_level_cm = last_30_days_min_cm / 100.0
-        max_level_cm = last_30_days_max_cm / 100.0
+        overall_min_cm = min(water_levels)  # ✅ CORRECT NAME
+        overall_max_cm = max(water_levels)  # ✅ CORRECT NAME
+        min_level_cm = overall_min_cm / 100.0
+        max_level_cm = overall_max_cm / 100.0
         
         # Calculate 30-day min/max
         thirty_days_ago = datetime.now() - timedelta(days=30)
@@ -173,8 +173,8 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
             last_30_days_max_m = last_30_days_max_cm / 100.0
         else:
             # Fallback to overall min/max if no recent data
-            last_30_days_min_cm = last_30_days_min_cm
-            last_30_days_max_cm = last_30_days_max_cm
+            last_30_days_min_cm = overall_min_cm  # ✅ Use correct variable
+            last_30_days_max_cm = overall_max_cm  # ✅ Use correct variable
             last_30_days_min_m = min_level_cm
             last_30_days_max_m = max_level_cm
         
@@ -193,11 +193,21 @@ def calculate_and_update_minmax(station_id: str, station_name: str):
             station_id
         ))
         
+        # Also update min_max_values table with overall historical values
+        cursor.execute("""
+            INSERT OR REPLACE INTO min_max_values 
+            (station_id, min_level_cm, max_level_cm, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, (
+            station_id, overall_min_cm, overall_max_cm, 
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        ))
+        
         conn.commit()
         conn.close()
         
         print(f"  ✅ Updated min/max values:")
-        print(f"    Historical: {last_30_days_min_cm:.2f} - {last_30_days_max_cm:.2f} cm")
+        print(f"    Historical: {overall_min_cm:.2f} - {overall_max_cm:.2f} cm")
         print(f"    30-day: {last_30_days_min_cm:.2f} - {last_30_days_max_cm:.2f} cm")
         return True
         

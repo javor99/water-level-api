@@ -54,7 +54,7 @@ def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
     
     try:
         r = requests.get(url, params=params, timeout=30)
-        r._for_status()
+        r.raise_for_status()
         raw = r.json()
 
         if not raw or not raw[0].get("results"):
@@ -273,7 +273,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         
         # Get the latest prediction for this station
         cursor.execute("""
-            SELECT predicted_level_cm, prediction_date
+            SELECT predicted_water_level_cm, prediction_date
             FROM predictions 
             WHERE station_id = ? 
             ORDER BY prediction_date DESC 
@@ -286,7 +286,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
             conn.close()
             return False
         
-        current_prediction = latest_prediction['predicted_level_cm']
+        current_prediction = latest_prediction['predicted_water_level_cm']
         
         # Get the maximum historical level for this station
         cursor.execute("""

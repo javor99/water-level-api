@@ -6,3 +6,4 @@ pandas==2.1.4
 bcrypt==4.0.1
 pyproj==3.6.1
 schedule==1.2.0
+torch==2.1.0

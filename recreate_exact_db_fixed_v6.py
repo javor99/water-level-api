@@ -113,13 +113,12 @@ def init_all_tables():
     ''')
     print("✅ Water levels table created")
     
-    # Create predictions table with nullable predicted_level_cm
+    # Create predictions table with correct schema
     cursor.execute('''
         CREATE TABLE predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             station_id TEXT NOT NULL,
             prediction_date DATE NOT NULL,
-            predicted_level_cm REAL,
             confidence_score REAL,
             model_used TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -129,7 +128,7 @@ def init_all_tables():
             forecast_date DATE
         )
     ''')
-    print("✅ Predictions table created with nullable predicted_level_cm")
+    print("✅ Predictions table created with correct schema")
     
     # Create last_30_days_historical table
     cursor.execute('''
@@ -228,6 +227,7 @@ def fix_all_scripts():
     content = content.replace('measurement_date', 'timestamp')
     content = content.replace('water_level_cm', 'level_cm')
     content = content.replace('water_level_m', 'level_cm')
+    content = content.replace('predicted_level_cm', 'predicted_water_level_cm')
     
     with open('background_scheduler.py', 'w') as f:
         f.write(content)
@@ -244,6 +244,7 @@ def fix_all_scripts():
     content = content.replace('water_level_cm', 'level_cm')
     content = content.replace('water_level_m', 'level_cm')
     content = content.replace('predicted_level_cm', 'predicted_water_level_cm')
+    content = content.replace('predicted_water_level_cm', 'predicted_water_level_cm')
     
     with open('update_new_station_data.py', 'w') as f:
         f.write(content)
