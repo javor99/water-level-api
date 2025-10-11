@@ -3,7 +3,7 @@
 
 """
 Background Scheduler for Water Level System
-Automatically updates 30-day history and predictions for all stations every 5 minutes.
+Automatically updates 30-day history and predictions for all stations every 24 hours.
 Enhanced with detailed logging.
 """
 
@@ -244,6 +244,26 @@ def update_predictions_for_station(station_id: str, station_name: str, latitude:
                         traceback.print_exc()
                         raise
                 
+                # Save predictions to past_predictions table (historical record)
+                print(f"    🔍 Saving predictions to past_predictions table...")
+                forecast_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                for _, row in df.iterrows():
+                    cursor.execute("""
+                        INSERT INTO past_predictions
+                        (station_id, prediction_date, predicted_water_level_cm,
+                         change_from_last_cm, forecast_created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        station_id,
+                        row['date'],
+                        row['predicted_water_level_cm'],
+                        row['change_from_last_daily_mean_cm'],
+                        forecast_timestamp
+                    ))
+                
+                print(f"    🔍 Saved {len(df)} predictions to past_predictions table")
+                
                 print(f"    🔍 Committing transaction...")
                 conn.commit()
                 print(f"    🔍 Closing connection...")
@@ -408,7 +428,7 @@ def update_all_stations():
           f"{results['predictions']}/{total_stations} predictions")
 
 def background_scheduler():
-    """Background scheduler that runs every 5 minutes."""
+    """Background scheduler that runs every 24 hours."""
     # Create log file for background scheduler
     log_file = open("background_scheduler.log", "a")
     
@@ -419,8 +439,8 @@ def background_scheduler():
         log_file.write(log_line)
         log_file.flush()
     
-    log_message("🚀 Background scheduler started - updating every 5 minutes")
-    log_message("📅 Next update scheduled in 5 minutes...")
+    log_message("🚀 Background scheduler started - updating every 24 hours")
+    log_message("📅 Next update scheduled in 24 hours...")
     
     while True:
         try:
@@ -430,8 +450,8 @@ def background_scheduler():
         except Exception as e:
             print(f"❌ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in background scheduler: {e}")
         
-        # Wait 5 minutes (300 seconds)
-        time.sleep(300)
+        # Wait 24 hours (86400 seconds)
+        time.sleep(86400)
 
 def start_background_scheduler():
     """Start the background scheduler in a separate thread."""
@@ -440,7 +460,7 @@ def start_background_scheduler():
     thread.daemon = True
     thread.start()
     print("✅ Background scheduler thread started successfully")
-    print("📝 Background scheduler will log to console every 5 minutes")
+    print("📝 Background scheduler will log to console every 24 hours")
     print("🔄 First update cycle will start immediately...")
 
 if __name__ == "__main__":

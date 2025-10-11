@@ -26,6 +26,7 @@ def init_all_tables():
     # FIRST: Drop all existing tables
     print("🗑️ Dropping existing tables...")
     tables_to_drop = [
+        'past_predictions',
         'station_subscriptions',
         'subscriptions', 
         'min_max_values',
@@ -180,6 +181,20 @@ def init_all_tables():
     ''')
     print("✅ Station subscriptions table created")
     
+    # Create past_predictions table (historical record of all predictions made)
+    cursor.execute('''
+        CREATE TABLE past_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            station_id TEXT NOT NULL,
+            prediction_date DATE NOT NULL,
+            predicted_water_level_cm REAL,
+            change_from_last_cm REAL,
+            forecast_created_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    print("✅ Past predictions table created (historical prediction archive)")
+    
     # Create default users with proper password hashing
     print("👤 Creating default users...")
     
@@ -214,6 +229,7 @@ def init_all_tables():
     print("  - Automatic data generation added to create_station (FIX #6)")
     print("  - All column name issues fixed in update scripts (FIX #7)")
     print("  - Background scheduler column names fixed (FIX #8)")
+    print("  - Past predictions table added for historical tracking (FIX #9)")
 
 def fix_all_scripts():
     """Fix all scripts with column name issues"""

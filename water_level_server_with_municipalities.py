@@ -1040,6 +1040,7 @@ def index():
             "GET /water-levels/<id>": "Station water levels with weather info",
             "GET /predictions": "All predictions",
             "GET /predictions/<id>": "Station predictions",
+            "GET /past-predictions/<id>": "Historical predictions archive for a station (public access)",
             "GET /weather-station": "Weather station information"
         },
         "roles": {
@@ -1474,6 +1475,52 @@ def get_station_predictions(station_id):
         "predictions": predictions,
         "weather_station_info": weather_info
     })
+
+@app.route('/past-predictions/<station_id>')
+def get_station_past_predictions(station_id):
+    """Get historical predictions for a specific station (public access)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if station exists
+    cursor.execute("SELECT s.name FROM stations s WHERE s.station_id = ?", (station_id,))
+    station = cursor.fetchone()
+    
+    if not station:
+        conn.close()
+        return jsonify({"success": False, "error": "Station not found"}), 404
+    
+    # Get all past predictions for this station, grouped by forecast date
+    cursor.execute("""
+        SELECT prediction_date, predicted_water_level_cm, 
+               predicted_water_level_cm/100 as predicted_water_level_m,
+               change_from_last_cm, forecast_created_at, created_at
+        FROM past_predictions
+        WHERE station_id = ?
+        ORDER BY forecast_created_at DESC, prediction_date ASC
+    """, (station_id,))
+    
+    past_predictions = []
+    for row in cursor.fetchall():
+        past_predictions.append({
+            "prediction_date": row['prediction_date'],
+            "predicted_water_level_cm": row['predicted_water_level_cm'],
+            "predicted_water_level_m": row['predicted_water_level_m'],
+            "change_from_last_cm": row['change_from_last_cm'],
+            "forecast_created_at": row['forecast_created_at'],
+            "created_at": row['created_at']
+        })
+    
+    conn.close()
+    
+    return jsonify({
+        "success": True,
+        "station_id": station_id,
+        "station_name": station['name'],
+        "count": len(past_predictions),
+        "past_predictions": past_predictions
+    })
+
 # ===== PROTECTED ENDPOINTS (require authentication) =====
 
 @app.route('/stations/<station_id>/minmax', methods=['GET'])
