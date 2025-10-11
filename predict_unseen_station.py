@@ -107,6 +107,100 @@ def fetch_weather_daily(lat: float, lon: float, past_days: int,
     return daily
 
 
+def check_and_interpolate_missing_days(daily_df: pd.DataFrame, max_missing: int = 3, 
+                                        lookback_days: int = 40) -> pd.DataFrame:
+    """
+    Check if there are missing days in the last lookback_days.
+    If missing days <= max_missing, interpolate them. Otherwise, raise an error.
+    
+    Args:
+        daily_df: DataFrame with 'date' and 'water_level_cm' columns
+        max_missing: Maximum number of missing days allowed for interpolation (default: 3)
+        lookback_days: Number of days to look back for checking missing data (default: 40)
+    
+    Returns:
+        DataFrame with interpolated values if applicable
+    """
+    if daily_df.empty:
+        return daily_df
+    
+    # Convert date column to datetime
+    daily_df = daily_df.copy()
+    daily_df['date'] = pd.to_datetime(daily_df['date'])
+    daily_df = daily_df.sort_values('date').reset_index(drop=True)
+    
+    # Get the most recent date and calculate the start of the lookback period
+    most_recent_date = daily_df['date'].max()
+    lookback_start = most_recent_date - timedelta(days=lookback_days)
+    
+    # Filter to the lookback period
+    lookback_df = daily_df[daily_df['date'] >= lookback_start].copy()
+    
+    if len(lookback_df) == 0:
+        print(f"⚠️  No data in the last {lookback_days} days")
+        return daily_df
+    
+    # Create a complete date range for the lookback period
+    date_range_start = lookback_df['date'].min()
+    date_range_end = lookback_df['date'].max()
+    all_dates = pd.date_range(start=date_range_start, end=date_range_end, freq='D')
+    
+    # Find missing dates
+    existing_dates = set(lookback_df['date'].dt.date)
+    all_dates_set = set(all_dates.date)
+    missing_dates = sorted(all_dates_set - existing_dates)
+    
+    num_missing = len(missing_dates)
+    
+    if num_missing == 0:
+        print(f"✅ No missing days in the last {lookback_days} days")
+        return daily_df
+    
+    print(f"📊 Found {num_missing} missing days in the last {lookback_days} days: {missing_dates[:10]}{'...' if num_missing > 10 else ''}")
+    
+    if num_missing > max_missing:
+        raise RuntimeError(
+            f"❌ Too many missing days in the last {lookback_days} days: {num_missing} missing days found.\n"
+            f"   Maximum allowed for interpolation: {max_missing} days.\n"
+            f"   Missing dates: {missing_dates}\n"
+            f"   Cannot generate reliable predictions with this much missing data."
+        )
+    
+    # Interpolate: create full date range and merge
+    print(f"🔧 Interpolating {num_missing} missing days using linear interpolation...")
+    
+    # Create complete date range DataFrame
+    complete_dates_df = pd.DataFrame({'date': all_dates})
+    
+    # Merge with existing data
+    merged_df = complete_dates_df.merge(lookback_df[['date', 'water_level_cm']], 
+                                         on='date', how='left')
+    
+    # Perform linear interpolation with both forward and backward fill
+    # This handles gaps in the middle and at the edges
+    merged_df['water_level_cm'] = merged_df['water_level_cm'].interpolate(
+        method='linear', limit_direction='both'
+    )
+    
+    # For any remaining NaN values at the edges (most recent days), use forward fill
+    # This fills the most recent missing days with the last known value
+    merged_df['water_level_cm'] = merged_df['water_level_cm'].fillna(method='ffill')
+    
+    # If there are still NaN values at the start, use backward fill
+    merged_df['water_level_cm'] = merged_df['water_level_cm'].fillna(method='bfill')
+    
+    # Combine: take data before lookback period + interpolated lookback period
+    before_lookback = daily_df[daily_df['date'] < lookback_start]
+    result_df = pd.concat([before_lookback, merged_df], ignore_index=True)
+    result_df = result_df.sort_values('date').reset_index(drop=True)
+    
+    print(f"✅ Successfully interpolated {num_missing} missing days")
+    
+    # Keep date as datetime for consistency with the rest of the pipeline
+    # (will be converted to date objects later when needed)
+    return result_df
+
+
 def fetch_water_daily(vandah_station_id: str, past_days: int) -> pd.DataFrame:
     """Vandah 15-min → daily mean (cm); columns: date, water_level_cm."""
     to_time = datetime.now(timezone.utc).replace(microsecond=0)
@@ -135,6 +229,15 @@ def fetch_water_daily(vandah_station_id: str, past_days: int) -> pd.DataFrame:
     })
     df["date"] = df["dt"].dt.date
     daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
+    
+    # Check and interpolate missing days (max 3 missing days in last 40 days)
+    daily = check_and_interpolate_missing_days(daily, max_missing=3, lookback_days=40)
+    
+    # Ensure date column is in the correct format (not datetime)
+    if hasattr(daily['date'].iloc[0], 'date'):
+        # If it's datetime, convert to date
+        daily['date'] = pd.to_datetime(daily['date']).dt.date
+    
     daily.to_csv(OUT_CSV_WATER, index=False)
     return daily
 
@@ -411,7 +514,17 @@ def main():
     weather_daily = fetch_weather_daily(args.lat, args.lon, args.past_days)
     water_daily = fetch_water_daily(args.vandah_id, args.past_days)
 
-    merged = pd.merge(water_daily, weather_daily, on="date", how="inner")
+    # Use outer merge to keep all water level data (interpolated or not)
+    # Fill missing weather data with forward/backward fill
+    merged = pd.merge(water_daily, weather_daily, on="date", how="outer")
+    merged = merged.sort_values('date').reset_index(drop=True)
+    
+    # Fill missing weather data (if any) using forward fill, then backward fill
+    weather_cols = ['Temp', 'Humidity', 'Wind_speed', 'rainfall_sum_1d']
+    for col in weather_cols:
+        if col in merged.columns:
+            merged[col] = merged[col].fillna(method='ffill').fillna(method='bfill')
+    
     if merged.empty:
         raise RuntimeError("No overlapping dates between weather and water data")
 
