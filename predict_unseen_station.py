@@ -107,19 +107,27 @@ def fetch_weather_daily(lat: float, lon: float, past_days: int,
     return daily
 
 
-def check_and_interpolate_missing_days(daily_df: pd.DataFrame, max_missing: int = 3, 
-                                        lookback_days: int = 40) -> pd.DataFrame:
+def check_and_fill_missing_days(daily_df: pd.DataFrame, max_missing: int = 3, 
+                                 lookback_days: int = 40) -> pd.DataFrame:
     """
-    Check if there are missing days in the last lookback_days.
-    If missing days <= max_missing, interpolate them. Otherwise, raise an error.
+    Check for missing days and fill them using smart interpolation strategies.
+    Handles gaps in the beginning, middle, and end of data.
+    
+    Strategies:
+    - Gaps in the middle: Linear interpolation
+    - Gaps at the beginning: Backward fill
+    - Gaps at the end: Forward fill
     
     Args:
         daily_df: DataFrame with 'date' and 'water_level_cm' columns
-        max_missing: Maximum number of missing days allowed for interpolation (default: 3)
+        max_missing: Maximum number of missing days allowed (default: 3, meaning 1, 2, or 3)
         lookback_days: Number of days to look back for checking missing data (default: 40)
     
     Returns:
-        DataFrame with interpolated values if applicable
+        DataFrame with filled values if missing days <= max_missing
+        
+    Raises:
+        RuntimeError: If missing days > max_missing
     """
     if daily_df.empty:
         return daily_df
@@ -156,18 +164,18 @@ def check_and_interpolate_missing_days(daily_df: pd.DataFrame, max_missing: int 
         print(f"✅ No missing days in the last {lookback_days} days")
         return daily_df
     
-    print(f"📊 Found {num_missing} missing days in the last {lookback_days} days: {missing_dates[:10]}{'...' if num_missing > 10 else ''}")
+    print(f"📊 Found {num_missing} missing days in the last {lookback_days} days")
     
     if num_missing > max_missing:
         raise RuntimeError(
             f"❌ Too many missing days in the last {lookback_days} days: {num_missing} missing days found.\n"
-            f"   Maximum allowed for interpolation: {max_missing} days.\n"
+            f"   Maximum allowed: {max_missing} days (meaning 1, 2, or 3 days).\n"
             f"   Missing dates: {missing_dates}\n"
             f"   Cannot generate reliable predictions with this much missing data."
         )
     
-    # Interpolate: create full date range and merge
-    print(f"🔧 Interpolating {num_missing} missing days using linear interpolation...")
+    # Fill missing days using smart strategies
+    print(f"🔧 Filling {num_missing} missing days...")
     
     # Create complete date range DataFrame
     complete_dates_df = pd.DataFrame({'date': all_dates})
@@ -176,28 +184,24 @@ def check_and_interpolate_missing_days(daily_df: pd.DataFrame, max_missing: int 
     merged_df = complete_dates_df.merge(lookback_df[['date', 'water_level_cm']], 
                                          on='date', how='left')
     
-    # Perform linear interpolation with both forward and backward fill
-    # This handles gaps in the middle and at the edges
+    # Strategy 1: Linear interpolation for gaps in the middle
     merged_df['water_level_cm'] = merged_df['water_level_cm'].interpolate(
         method='linear', limit_direction='both'
     )
     
-    # For any remaining NaN values at the edges (most recent days), use forward fill
-    # This fills the most recent missing days with the last known value
+    # Strategy 2: Forward fill for any remaining NaN at the end
     merged_df['water_level_cm'] = merged_df['water_level_cm'].fillna(method='ffill')
     
-    # If there are still NaN values at the start, use backward fill
+    # Strategy 3: Backward fill for any remaining NaN at the beginning
     merged_df['water_level_cm'] = merged_df['water_level_cm'].fillna(method='bfill')
     
-    # Combine: take data before lookback period + interpolated lookback period
+    # Combine: take data before lookback period + filled lookback period
     before_lookback = daily_df[daily_df['date'] < lookback_start]
     result_df = pd.concat([before_lookback, merged_df], ignore_index=True)
     result_df = result_df.sort_values('date').reset_index(drop=True)
     
-    print(f"✅ Successfully interpolated {num_missing} missing days")
+    print(f"✅ Successfully filled {num_missing} missing days (interpolation + forward/backward fill)")
     
-    # Keep date as datetime for consistency with the rest of the pipeline
-    # (will be converted to date objects later when needed)
     return result_df
 
 
@@ -230,13 +234,39 @@ def fetch_water_daily(vandah_station_id: str, past_days: int) -> pd.DataFrame:
     df["date"] = df["dt"].dt.date
     daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
     
-    # Check and interpolate missing days (max 3 missing days in last 40 days)
-    daily = check_and_interpolate_missing_days(daily, max_missing=3, lookback_days=40)
+    # STEP 1: Check total missing days including gap to today
+    daily['date'] = pd.to_datetime(daily['date'])
+    last_date = daily['date'].max()
+    today = pd.Timestamp.now().normalize()
+    days_to_today = (today - last_date).days
+    
+    # STEP 2: Check and fill missing days within the data range + extend to today
+    daily_filled = check_and_fill_missing_days(daily, max_missing=3, lookback_days=40)
+    
+    # STEP 3: Extend to today if needed (counting this as part of total missing days)
+    if 0 < days_to_today <= 3:
+        # Extend to today with forward fill
+        print(f"📅 Extending data from {last_date.date()} to {today.date()} ({days_to_today} days)")
+        date_range = pd.date_range(start=last_date + pd.Timedelta(days=1), end=today, freq='D')
+        last_value = daily_filled['water_level_cm'].iloc[-1]
+        
+        extension_df = pd.DataFrame({
+            'date': date_range,
+            'water_level_cm': last_value
+        })
+        
+        daily_filled = pd.concat([daily_filled, extension_df], ignore_index=True)
+        print(f"✅ Extended with {len(extension_df)} days using last value: {last_value:.2f} cm")
+    elif days_to_today > 3:
+        raise RuntimeError(
+            f"❌ Data is too old: last measurement was {days_to_today} days ago ({last_date.date()}).\n"
+            f"   Maximum allowed data age: 3 days.\n"
+            f"   Cannot generate reliable predictions with data this stale."
+        )
     
     # Ensure date column is in the correct format (not datetime)
-    if hasattr(daily['date'].iloc[0], 'date'):
-        # If it's datetime, convert to date
-        daily['date'] = pd.to_datetime(daily['date']).dt.date
+    daily = daily_filled
+    daily['date'] = daily['date'].dt.date
     
     daily.to_csv(OUT_CSV_WATER, index=False)
     return daily
@@ -514,9 +544,8 @@ def main():
     weather_daily = fetch_weather_daily(args.lat, args.lon, args.past_days)
     water_daily = fetch_water_daily(args.vandah_id, args.past_days)
 
-    # Use outer merge to keep all water level data (interpolated or not)
-    # Fill missing weather data with forward/backward fill
-    merged = pd.merge(water_daily, weather_daily, on="date", how="outer")
+    # Use left merge to keep only water level dates (not future weather-only dates)
+    merged = pd.merge(water_daily, weather_daily, on="date", how="left")
     merged = merged.sort_values('date').reset_index(drop=True)
     
     # Fill missing weather data (if any) using forward fill, then backward fill

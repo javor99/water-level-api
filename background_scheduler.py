@@ -3,7 +3,7 @@
 
 """
 Background Scheduler for Water Level System
-Automatically updates 30-day history and predictions for all stations every 24 hours.
+Automatically updates 30-day history and predictions for all stations every 12 hours.
 Enhanced with detailed logging.
 """
 
@@ -428,7 +428,7 @@ def update_all_stations():
           f"{results['predictions']}/{total_stations} predictions")
 
 def background_scheduler():
-    """Background scheduler that runs every 24 hours."""
+    """Background scheduler that runs every 12 hours."""
     # Create log file for background scheduler
     log_file = open("background_scheduler.log", "a")
     
@@ -439,8 +439,8 @@ def background_scheduler():
         log_file.write(log_line)
         log_file.flush()
     
-    log_message("🚀 Background scheduler started - updating every 24 hours")
-    log_message("📅 Next update scheduled in 24 hours...")
+    log_message("🚀 Background scheduler started - updating every 12 hours")
+    log_message("📅 Next update scheduled in 12 hours...")
     
     while True:
         try:
@@ -450,8 +450,8 @@ def background_scheduler():
         except Exception as e:
             print(f"❌ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in background scheduler: {e}")
         
-        # Wait 24 hours (86400 seconds)
-        time.sleep(86400)
+        # Wait 12 hours (43200 seconds)
+        time.sleep(43200)
 
 def start_background_scheduler():
     """Start the background scheduler in a separate thread."""
@@ -460,7 +460,7 @@ def start_background_scheduler():
     thread.daemon = True
     thread.start()
     print("✅ Background scheduler thread started successfully")
-    print("📝 Background scheduler will log to console every 24 hours")
+    print("📝 Background scheduler will log to console every 12 hours")
     print("🔄 First update cycle will start immediately...")
 
 if __name__ == "__main__":
