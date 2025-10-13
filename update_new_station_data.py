@@ -280,7 +280,10 @@ def save_predictions_to_db(station_id: str):
         
         # Insert new predictions with correct column mapping
         records_inserted = 0
+        forecast_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         for _, row in df.iterrows():
+            # Save to predictions table (current predictions)
             cursor.execute("""
                 INSERT INTO predictions
                 (station_id, prediction_date, predicted_water_level_cm,
@@ -292,14 +295,29 @@ def save_predictions_to_db(station_id: str):
                 row['predicted_water_level_cm'],  # CSV has this column name
                 row['change_from_last_daily_mean_cm'],  # CSV has this column name
                 row['date'],  # Use same date for forecast_date
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                forecast_timestamp
             ))
+            
+            # Also save to past_predictions table (historical archive)
+            cursor.execute("""
+                INSERT INTO past_predictions
+                (station_id, prediction_date, predicted_water_level_cm,
+                 change_from_last_cm, forecast_created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                station_id,
+                row['date'],
+                row['predicted_water_level_cm'],
+                row['change_from_last_daily_mean_cm'],
+                forecast_timestamp
+            ))
+            
             records_inserted += 1
         
         conn.commit()
         conn.close()
         
-        print(f"  💾 Saved {records_inserted} predictions to database")
+        print(f"  💾 Saved {records_inserted} predictions to database (predictions + past_predictions tables)")
         return True
         
     except Exception as e:

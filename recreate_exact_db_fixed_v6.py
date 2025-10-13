@@ -147,13 +147,13 @@ def init_all_tables():
     cursor.execute('''
         CREATE TABLE min_max_values (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            station_id TEXT NOT NULL,
+            station_id TEXT NOT NULL UNIQUE,
             min_level_cm REAL,
             max_level_cm REAL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    print("✅ Min/Max values table created")
+    print("✅ Min/Max values table created with UNIQUE station_id")
     
     # Create subscriptions table
     cursor.execute('''

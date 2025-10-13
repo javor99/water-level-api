@@ -1094,9 +1094,9 @@ def get_stations():
     })
 
 @app.route('/stations', methods=['POST'])
-@require_role('superadmin')
+@require_role('admin')
 def create_station():
-    """Create new station - superadmin required."""
+    """Create new station - admin or superadmin required."""
     logger.info("Station creation request received")
     try:
         data = request.get_json()
@@ -1251,9 +1251,9 @@ def get_station(station_id):
         return jsonify({"success": False, "error": "Station not found"}), 404
 
 @app.route('/stations/<station_id>', methods=['DELETE'])
-@require_role('superadmin')
+@require_role('admin')
 def delete_station(station_id):
-    """Delete a station and all its associated data."""
+    """Delete a station and all its associated data - admin or superadmin required."""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -1270,6 +1270,7 @@ def delete_station(station_id):
         # Delete all associated data
         cursor.execute("DELETE FROM water_levels WHERE station_id = ?", (station_id,))
         cursor.execute("DELETE FROM predictions WHERE station_id = ?", (station_id,))
+        cursor.execute("DELETE FROM past_predictions WHERE station_id = ?", (station_id,))
         cursor.execute("DELETE FROM last_30_days_historical WHERE station_id = ?", (station_id,))
         cursor.execute("DELETE FROM stations WHERE station_id = ?", (station_id,))
         
@@ -1577,6 +1578,7 @@ def get_station_minmax(station_id):
         return jsonify({"error": f"Failed to get station min/max values: {str(e)}"}), 500
 
 @app.route('/stations/<station_id>/minmax', methods=['POST'])
+@require_role('admin')
 def update_station_minmax(station_id):
     """Update min/max water level values for a specific station (admin/superadmin only)."""
     try:
@@ -1638,6 +1640,7 @@ def update_station_minmax(station_id):
         return jsonify({"error": f"Failed to update station min/max values: {str(e)}"}), 500
 
 @app.route('/stations/minmax/bulk', methods=['POST'])
+@require_role('admin')
 def update_bulk_station_minmax():
     """Update min/max water level values for multiple stations at once (admin/superadmin only)."""
     try:
@@ -1850,11 +1853,11 @@ def get_user_subscriptions():
         # Get all active subscriptions
         cursor.execute("""
             SELECT ss.station_id, s.name as station_name, ss.threshold_percentage, 
-                   ss.created_at, ss.updated_at
+                   ss.updated_at
             FROM station_subscriptions ss
             JOIN stations s ON ss.station_id = s.station_id
             WHERE ss.user_email = ? AND ss.is_active = 1
-            ORDER BY ss.created_at DESC
+            ORDER BY ss.updated_at DESC
         """, (user_email,))
         
         subscriptions = cursor.fetchall()
@@ -1866,7 +1869,6 @@ def get_user_subscriptions():
                     "station_id": sub["station_id"],
                     "station_name": sub["station_name"],
                     "threshold_percentage": sub["threshold_percentage"],
-                    "created_at": sub["created_at"],
                     "updated_at": sub["updated_at"]
                 }
                 for sub in subscriptions
