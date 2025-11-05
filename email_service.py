@@ -4,12 +4,14 @@
 """
 Email Service for Water Level Alerts
 Handles sending email notifications for water level predictions
+Configured for DTU SMTP server (smtp.ait.dtu.dk)
 """
 
 import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr
 from datetime import datetime
 import logging
 
@@ -19,31 +21,33 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
-        """Initialize email service with SMTP configuration."""
-        # Email configuration from environment variables
-        self.smtp_server = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-        self.smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+        """Initialize email service with DTU SMTP configuration."""
+        # DTU SMTP Configuration (no authentication required)
+        self.smtp_server = os.environ.get('SMTP_SERVER', 'smtp.ait.dtu.dk')
+        self.smtp_port = int(os.environ.get('SMTP_PORT', '25'))
+        self.from_email = os.environ.get('FROM_EMAIL', 'aquamonitor@dtu.dk')
+        self.from_name = os.environ.get('FROM_NAME', 'Aqua Monitor')
+        
+        # Default recipients (can be overridden in method calls)
+        default_receivers = os.environ.get('DEFAULT_RECEIVERS', 'aquamonitor@dtu.dk, s232467@student.dtu.dk')
+        self.default_receivers = [email.strip() for email in default_receivers.split(',')]
+        
+        # DTU SMTP doesn't require authentication
+        self.use_auth = os.environ.get('SMTP_USE_AUTH', 'false').lower() == 'true'
         self.smtp_username = os.environ.get('SMTP_USERNAME', '')
         self.smtp_password = os.environ.get('SMTP_PASSWORD', '')
-        self.from_email = os.environ.get('FROM_EMAIL', self.smtp_username)
-        self.from_name = os.environ.get('FROM_NAME', 'Water Level Alert System')
         
-        # Validate configuration
-        if not self.smtp_username or not self.smtp_password:
-            logger.warning("⚠️  Email service not configured - SMTP credentials missing")
-            logger.warning("Set SMTP_USERNAME and SMTP_PASSWORD environment variables")
-            self.enabled = False
-        else:
-            self.enabled = True
-            logger.info(f"✅ Email service configured for {self.from_email}")
+        self.enabled = True
+        logger.info(f"✅ Email service configured for {self.from_email} via {self.smtp_server}:{self.smtp_port}")
+        logger.info(f"📧 Default receivers: {', '.join(self.default_receivers)}")
 
     def send_water_level_alert(self, user_email, station_name, station_id, 
                              current_prediction, max_level, threshold_percentage=0.9):
         """
-        Send water level alert email to user.
+        Send water level alert email to user and default receivers.
         
         Args:
-            user_email (str): Recipient email address
+            user_email (str): Recipient email address (also sent to default receivers)
             station_name (str): Name of the water level station
             station_id (str): Station ID
             current_prediction (float): Current predicted water level
@@ -58,43 +62,81 @@ class EmailService:
             # Calculate threshold level
             threshold_level = max_level * threshold_percentage
             
+            # Combine recipients: user_email + default receivers
+            all_recipients = list(set([user_email] + self.default_receivers))
+            recipients_str = ', '.join(all_recipients)
+            
             # Create message
             msg = MIMEMultipart()
-            msg['From'] = f"{self.from_name} <{self.from_email}>"
-            msg['To'] = user_email
+            msg['From'] = formataddr((self.from_name, self.from_email))
+            msg['To'] = recipients_str
             msg['Subject'] = f"🚨 Water Level Alert - {station_name}"
             
-            # Create email body
+            # Create HTML email body
             body = f"""
-🚨 WATER LEVEL ALERT 🚨
-
-Station: {station_name} (ID: {station_id})
-Current Prediction: {current_prediction:.2f} meters
-Maximum Historical Level: {max_level:.2f} meters
-Alert Threshold: {threshold_percentage*100:.0f}% ({threshold_level:.2f} meters)
-
-⚠️  WARNING: The predicted water level ({current_prediction:.2f}m) has exceeded 
-the alert threshold of {threshold_percentage*100:.0f}% of the maximum historical level.
-
-This alert was triggered at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-Please take appropriate precautions and monitor the situation closely.
-
----
-Water Level Alert System
-Automated notification service
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="background-color: #ff4444; color: white; padding: 20px; border-radius: 5px;">
+                    <h2 style="margin: 0;">🚨 WATER LEVEL ALERT 🚨</h2>
+                </div>
+                
+                <div style="padding: 20px; background-color: #f9f9f9; margin-top: 20px; border-radius: 5px;">
+                    <h3 style="color: #ff4444;">Station Information</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px; font-weight: bold;">Station:</td>
+                            <td style="padding: 8px;">{station_name} (ID: {station_id})</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; font-weight: bold;">Current Prediction:</td>
+                            <td style="padding: 8px;"><strong style="color: #ff4444;">{current_prediction:.2f} meters</strong></td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; font-weight: bold;">Maximum Historical Level:</td>
+                            <td style="padding: 8px;">{max_level:.2f} meters</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; font-weight: bold;">Alert Threshold:</td>
+                            <td style="padding: 8px;">{threshold_percentage*100:.0f}% ({threshold_level:.2f} meters)</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div style="padding: 20px; background-color: #fff3cd; margin-top: 20px; border-left: 5px solid #ffa500; border-radius: 5px;">
+                    <p style="margin: 0;"><strong>⚠️ WARNING:</strong> The predicted water level ({current_prediction:.2f}m) has exceeded 
+                    the alert threshold of {threshold_percentage*100:.0f}% of the maximum historical level.</p>
+                </div>
+                
+                <div style="padding: 20px; margin-top: 20px;">
+                    <p><strong>Alert triggered at:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p>Please take appropriate precautions and monitor the situation closely.</p>
+                </div>
+                
+                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                
+                <div style="padding: 10px; color: #666; font-size: 12px;">
+                    <p style="margin: 0;"><strong>Aqua Monitor</strong></p>
+                    <p style="margin: 5px 0;">Automated Water Level Alert System</p>
+                </div>
+            </body>
+            </html>
             """
             
-            msg.attach(MIMEText(body, 'plain'))
+            msg.attach(MIMEText(body, 'html'))
             
-            # Send email
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            # Send email using DTU SMTP (no authentication needed)
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.ehlo()
+            
+            # Only use authentication if required
+            if self.use_auth and self.smtp_username and self.smtp_password:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
-                text = msg.as_string()
-                server.sendmail(self.from_email, user_email, text)
             
-            logger.info(f"�� Alert email sent successfully to {user_email} for station {station_name}")
+            server.sendmail(self.from_email, all_recipients, msg.as_string())
+            server.quit()
+            
+            logger.info(f"📧 Alert email sent successfully to {recipients_str} for station {station_name}")
             return True
             
         except Exception as e:
@@ -111,42 +153,65 @@ Automated notification service
             station_id (str): Station ID
         """
         if not self.enabled:
-            logger.warning(f"�� Email service disabled - would send confirmation to {user_email}")
+            logger.warning(f"📧 Email service disabled - would send confirmation to {user_email}")
             return False
 
         try:
+            # Combine recipients: user_email + default receivers
+            all_recipients = list(set([user_email] + self.default_receivers))
+            recipients_str = ', '.join(all_recipients)
+            
             msg = MIMEMultipart()
-            msg['From'] = f"{self.from_name} <{self.from_email}>"
-            msg['To'] = user_email
+            msg['From'] = formataddr((self.from_name, self.from_email))
+            msg['To'] = recipients_str
             msg['Subject'] = f"✅ Subscription Confirmed - {station_name}"
             
+            # Create HTML email body
             body = f"""
-✅ SUBSCRIPTION CONFIRMED
-
-You have successfully subscribed to water level alerts for:
-Station: {station_name} (ID: {station_id})
-
-You will receive email notifications when the predicted water level exceeds 
-90% of the maximum historical level for this station.
-
-Subscription activated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-To unsubscribe, please contact the system administrator or use the unsubscribe API endpoint.
-
----
-Water Level Alert System
-Automated notification service
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="background-color: #28a745; color: white; padding: 20px; border-radius: 5px;">
+                    <h2 style="margin: 0;">✅ SUBSCRIPTION CONFIRMED</h2>
+                </div>
+                
+                <div style="padding: 20px; background-color: #f9f9f9; margin-top: 20px; border-radius: 5px;">
+                    <p>You have successfully subscribed to water level alerts for:</p>
+                    <h3 style="color: #28a745;">{station_name} (ID: {station_id})</h3>
+                </div>
+                
+                <div style="padding: 20px; margin-top: 20px;">
+                    <p>You will receive email notifications when the predicted water level exceeds 
+                    90% of the maximum historical level for this station.</p>
+                    
+                    <p><strong>Subscription activated at:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    
+                    <p>To unsubscribe, please contact the system administrator or use the unsubscribe API endpoint.</p>
+                </div>
+                
+                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                
+                <div style="padding: 10px; color: #666; font-size: 12px;">
+                    <p style="margin: 0;"><strong>Aqua Monitor</strong></p>
+                    <p style="margin: 5px 0;">Automated Water Level Alert System</p>
+                </div>
+            </body>
+            </html>
             """
             
-            msg.attach(MIMEText(body, 'plain'))
+            msg.attach(MIMEText(body, 'html'))
             
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            # Send email using DTU SMTP
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.ehlo()
+            
+            if self.use_auth and self.smtp_username and self.smtp_password:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
-                text = msg.as_string()
-                server.sendmail(self.from_email, user_email, text)
             
-            logger.info(f"📧 Confirmation email sent to {user_email} for station {station_name}")
+            server.sendmail(self.from_email, all_recipients, msg.as_string())
+            server.quit()
+            
+            logger.info(f"📧 Confirmation email sent to {recipients_str} for station {station_name}")
             return True
             
         except Exception as e:
@@ -160,9 +225,14 @@ Automated notification service
             return False
 
         try:
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.ehlo()
+            
+            if self.use_auth and self.smtp_username and self.smtp_password:
                 server.starttls()
                 server.login(self.smtp_username, self.smtp_password)
+            
+            server.quit()
             logger.info("✅ Email service connection test successful")
             return True
         except Exception as e:
@@ -196,6 +266,9 @@ if __name__ == "__main__":
     # Test connection
     if test_email_connection():
         print("✅ Email service is working correctly")
+        print(f"📧 SMTP Server: {email_service.smtp_server}:{email_service.smtp_port}")
+        print(f"📧 From: {email_service.from_name} <{email_service.from_email}>")
+        print(f"📧 Default receivers: {', '.join(email_service.default_receivers)}")
         
         # Test sending a sample alert (uncomment to test)
         # send_water_level_alert(
@@ -208,10 +281,9 @@ if __name__ == "__main__":
         # )
     else:
         print("❌ Email service configuration issue")
-        print("Please set the following environment variables:")
-        print("- SMTP_SERVER (default: smtp.gmail.com)")
-        print("- SMTP_PORT (default: 587)")
-        print("- SMTP_USERNAME")
-        print("- SMTP_PASSWORD")
-        print("- FROM_EMAIL (optional, defaults to SMTP_USERNAME)")
-        print("- FROM_NAME (optional, defaults to 'Water Level Alert System')")
+        print("\nCurrent configuration:")
+        print(f"- SMTP_SERVER: {email_service.smtp_server}")
+        print(f"- SMTP_PORT: {email_service.smtp_port}")
+        print(f"- FROM_EMAIL: {email_service.from_email}")
+        print(f"- FROM_NAME: {email_service.from_name}")
+        print(f"- DEFAULT_RECEIVERS: {', '.join(email_service.default_receivers)}")

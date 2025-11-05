@@ -124,11 +124,13 @@ def init_user_table():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
+            municipality_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP,
             is_active BOOLEAN DEFAULT 1,
             created_by INTEGER,
-            FOREIGN KEY (created_by) REFERENCES users (id)
+            FOREIGN KEY (created_by) REFERENCES users (id),
+            FOREIGN KEY (municipality_id) REFERENCES municipalities (id)
         )
     ''')
     
@@ -282,6 +284,7 @@ def register_user():
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         role = data.get('role', 'user').strip().lower()
+        municipality_id = data.get('municipality_id')
         
         # Validation
         if not email:
@@ -298,6 +301,11 @@ def register_user():
         if role not in valid_roles:
             return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
         
+        # Validate municipality_id if provided
+        if municipality_id is not None:
+            if not isinstance(municipality_id, int):
+                return jsonify({'error': 'municipality_id must be an integer'}), 400
+        
         # Basic email validation
         if '@' not in email or '.' not in email:
             return jsonify({'error': 'Invalid email format'}), 400
@@ -311,27 +319,42 @@ def register_user():
             conn.close()
             return jsonify({'error': 'User with this email already exists'}), 409
         
+        # Check if municipality exists (if provided)
+        if municipality_id is not None:
+            cursor.execute('SELECT id, name FROM municipalities WHERE id = ?', (municipality_id,))
+            municipality = cursor.fetchone()
+            if not municipality:
+                conn.close()
+                return jsonify({'error': f'Municipality with id {municipality_id} does not exist'}), 404
+            municipality_name = municipality['name']
+        else:
+            municipality_name = None
+        
         # Hash password and create user
         password_hash = hash_password(password)
         creator_email = get_user_email_from_jwt()
         
         cursor.execute('''
-            INSERT INTO users (email, password_hash, role, created_by)
-            VALUES (?, ?, ?, ?)
-        ''', (email, password_hash, role, creator_email))
+            INSERT INTO users (email, password_hash, role, municipality_id, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (email, password_hash, role, municipality_id, creator_email))
         
         user_id = cursor.lastrowid
         conn.commit()
         conn.close()
         
-        return jsonify({
+        response_data = {
             'message': 'User registered successfully',
             'user': {
                 'id': user_id,
                 'email': email,
-                'role': role
+                'role': role,
+                'municipality_id': municipality_id,
+                'municipality_name': municipality_name
             }
-        }), 201
+        }
+        
+        return jsonify(response_data), 201
         
     except Exception as e:
         return jsonify({'error': f'Registration failed: {str(e)}'}), 500
@@ -360,9 +383,10 @@ def login_user():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, email, password_hash, role, is_active
-            FROM users 
-            WHERE email = ?
+            SELECT u.id, u.email, u.password_hash, u.role, u.is_active, u.municipality_id, m.name as municipality_name
+            FROM users u
+            LEFT JOIN municipalities m ON u.municipality_id = m.id
+            WHERE u.email = ?
         ''', (email,))
         
         user = cursor.fetchone()
@@ -393,15 +417,19 @@ def login_user():
         # Generate JWT token
         token = generate_jwt_token(user['id'], user['email'], user['role'])
         
-        return jsonify({
+        response_data = {
             'message': 'Login successful',
             'user': {
                 'id': user['id'],
                 'email': user['email'],
-                'role': user['role']
+                'role': user['role'],
+                'municipality_id': user['municipality_id'],
+                'municipality_name': user['municipality_name']
             },
             'token': token
-        }), 200
+        }
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         return jsonify({'error': f'Login failed: {str(e)}'}), 500
@@ -426,11 +454,11 @@ def list_users():
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, email, role, created_at, last_login, is_active, created_by
-                   
-            FROM users
-            
-            ORDER BY created_at DESC
+            SELECT u.id, u.email, u.role, u.municipality_id, m.name as municipality_name,
+                   u.created_at, u.last_login, u.is_active, u.created_by
+            FROM users u
+            LEFT JOIN municipalities m ON u.municipality_id = m.id
+            ORDER BY u.created_at DESC
         ''')
         
         users = []
@@ -439,6 +467,8 @@ def list_users():
                 'id': row['id'],
                 'email': row['email'],
                 'role': row['role'],
+                'municipality_id': row['municipality_id'],
+                'municipality_name': row['municipality_name'],
                 'created_at': row['created_at'],
                 'last_login': row['last_login'],
                 'is_active': bool(row['is_active']),
@@ -455,6 +485,107 @@ def list_users():
         
     except Exception as e:
         return jsonify({'error': f'Failed to list users: {str(e)}'}), 500
+
+@app.route('/auth/user/municipality', methods=['GET'])
+@require_auth
+def get_user_municipality():
+    """Get the municipality assigned to the current authenticated user.
+    Superadmins get all municipalities."""
+    try:
+        # Get user from token
+        user_id = request.current_user.get('user_id')
+        user_role = request.current_user.get('role')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT u.id, u.email, u.role, u.municipality_id, m.name as municipality_name,
+                   m.region, m.population, m.area_km2, m.description
+            FROM users u
+            LEFT JOIN municipalities m ON u.municipality_id = m.id
+            WHERE u.id = ?
+        ''', (user_id,))
+        
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+        
+        # If superadmin, return all municipalities
+        if user_role == 'superadmin':
+            cursor.execute('''
+                SELECT id, name, region, population, area_km2, description,
+                       created_at, updated_at, created_by, updated_by
+                FROM municipalities
+                ORDER BY name
+            ''')
+            
+            municipalities = []
+            for row in cursor.fetchall():
+                municipalities.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'region': row['region'],
+                    'population': row['population'],
+                    'area_km2': row['area_km2'],
+                    'description': row['description'],
+                    'created_at': row['created_at'],
+                    'updated_at': row['updated_at'],
+                    'created_by': row['created_by'],
+                    'updated_by': row['updated_by']
+                })
+            
+            conn.close()
+            
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id': user['id'],
+                    'email': user['email'],
+                    'role': user['role']
+                },
+                'municipalities': municipalities,
+                'count': len(municipalities),
+                'message': 'Superadmin has access to all municipalities'
+            }), 200
+        
+        # For non-superadmin users, return their assigned municipality
+        conn.close()
+        
+        if user['municipality_id'] is None:
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id': user['id'],
+                    'email': user['email'],
+                    'role': user['role']
+                },
+                'municipality': None,
+                'message': 'No municipality assigned to this user'
+            }), 200
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'role': user['role']
+            },
+            'municipality': {
+                'id': user['municipality_id'],
+                'name': user['municipality_name'],
+                'region': user['region'],
+                'population': user['population'],
+                'area_km2': user['area_km2'],
+                'description': user['description']
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get user municipality: {str(e)}'}), 500
+
 @app.route('/auth/users/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
     """Update user details (superadmin only)."""
@@ -509,6 +640,18 @@ def update_user(user_id):
             password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             update_fields.append('password_hash = ?')
             update_values.append(password_hash)
+        
+        if 'municipality_id' in data:
+            new_municipality_id = data['municipality_id']
+            if new_municipality_id is not None:
+                # Validate municipality exists
+                cursor.execute('SELECT id FROM municipalities WHERE id = ?', (new_municipality_id,))
+                if not cursor.fetchone():
+                    conn.close()
+                    return jsonify({'error': f'Municipality with id {new_municipality_id} does not exist'}), 404
+            
+            update_fields.append('municipality_id = ?')
+            update_values.append(new_municipality_id)
         
         if not update_fields:
             conn.close()
@@ -1018,10 +1161,11 @@ def index():
         "version": "3.0",
         "description": "API for water level data and predictions with user authentication and role-based access control",
         "endpoints": {
-            "POST /auth/register": "Register a new user (superadmin only)",
+            "POST /auth/register": "Register a new user with optional municipality assignment (superadmin only)",
             "POST /auth/login": "Login user",
             "GET /auth/verify": "Verify authentication token",
-            "GET /auth/users": "List all users (admin/superadmin only)",
+            "GET /auth/users": "List all users with municipality info (admin/superadmin only)",
+            "GET /auth/user/municipality": "Get municipality assigned to current authenticated user",
             "GET /municipalities": "List all municipalities (public access)",
             "GET /municipalities/<id>": "Get specific municipality (public access)",
             "POST /municipalities": "Create new municipality (superadmin only)",
@@ -1738,7 +1882,8 @@ def update_bulk_station_minmax():
 @app.route('/stations/<station_id>/subscribe', methods=['POST'])
 @require_auth
 def subscribe_to_station(station_id):
-    """Subscribe to water level alerts for a station."""
+    """Subscribe to water level alerts for a station.
+    Supports both high water (flooding) and low water (drying out) alerts."""
     try:
         # Get user email from token
         auth_header = request.headers.get('Authorization')
@@ -1749,6 +1894,13 @@ def subscribe_to_station(station_id):
         # Get request data
         data = request.get_json() or {}
         threshold_percentage = data.get('threshold_percentage', 0.9)
+        alert_type = data.get('alert_type', 'above').lower()
+        
+        # Validate alert_type
+        if alert_type not in ['above', 'below']:
+            return jsonify({
+                "error": "Invalid alert_type. Must be 'above' (flooding) or 'below' (drying out)"
+            }), 400
         
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -1765,9 +1917,9 @@ def subscribe_to_station(station_id):
         # Insert or update subscription
         cursor.execute("""
             INSERT OR REPLACE INTO station_subscriptions 
-            (user_email, station_id, threshold_percentage, is_active, updated_at)
-            VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
-        """, (user_email, station_id, threshold_percentage))
+            (user_email, station_id, threshold_percentage, alert_type, is_active, updated_at)
+            VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+        """, (user_email, station_id, threshold_percentage, alert_type))
         
         conn.commit()
         conn.close()
@@ -1775,13 +1927,17 @@ def subscribe_to_station(station_id):
         # Send confirmation email
         send_subscription_confirmation(user_email, station_name, station_id)
         
+        alert_description = "flooding (water level exceeds threshold)" if alert_type == 'above' else "drying out (water level falls below threshold)"
+        
         return jsonify({
-            "message": "Successfully subscribed to station alerts",
+            "message": f"Successfully subscribed to {alert_type} threshold alerts",
             "subscription": {
                 "user_email": user_email,
                 "station_id": station_id,
                 "station_name": station_name,
-                "threshold_percentage": threshold_percentage
+                "threshold_percentage": threshold_percentage,
+                "alert_type": alert_type,
+                "description": alert_description
             }
         }), 200
         
@@ -1853,7 +2009,7 @@ def get_user_subscriptions():
         # Get all active subscriptions
         cursor.execute("""
             SELECT ss.station_id, s.name as station_name, ss.threshold_percentage, 
-                   ss.updated_at
+                   ss.alert_type, ss.updated_at
             FROM station_subscriptions ss
             JOIN stations s ON ss.station_id = s.station_id
             WHERE ss.user_email = ? AND ss.is_active = 1
@@ -1869,6 +2025,8 @@ def get_user_subscriptions():
                     "station_id": sub["station_id"],
                     "station_name": sub["station_name"],
                     "threshold_percentage": sub["threshold_percentage"],
+                    "alert_type": sub["alert_type"],
+                    "description": "flooding (above threshold)" if sub["alert_type"] == "above" else "drying out (below threshold)",
                     "updated_at": sub["updated_at"]
                 }
                 for sub in subscriptions
