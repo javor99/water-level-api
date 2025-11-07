@@ -159,12 +159,13 @@ def init_all_tables():
             user_email TEXT NOT NULL,
             station_id TEXT NOT NULL,
             threshold_percentage REAL,
+            alert_type TEXT DEFAULT 'above',
             is_active BOOLEAN DEFAULT 1,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (user_email, station_id)
+            PRIMARY KEY (user_email, station_id, alert_type)
         )
     ''')
-    print("✅ Station subscriptions table created")
+    print("✅ Station subscriptions table created (supports both flood and drain alerts per station)")
     
     # Create default users
     print("👤 Creating default users...")

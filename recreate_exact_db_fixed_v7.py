@@ -190,10 +190,10 @@ def init_all_tables():
             alert_type TEXT DEFAULT 'above',
             is_active BOOLEAN DEFAULT 1,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (user_email, station_id)
+            PRIMARY KEY (user_email, station_id, alert_type)
         )
     ''')
-    print("✅ Station subscriptions table created with alert_type support (above/below threshold)")
+    print("✅ Station subscriptions table created with alert_type support (allows both flood and drain per station)")
     
     # Create past_predictions table (historical record of all predictions made)
     cursor.execute('''
@@ -268,22 +268,25 @@ def fix_all_scripts():
     
     print("✅ Fixed background_scheduler.py")
     
-    # Fix update_new_station_data.py
-    print("🔧 Fixing update_new_station_data.py...")
-    with open('update_new_station_data.py', 'r') as f:
-        content = f.read()
-    
-    # Fix all column name issues
-    content = content.replace('measurement_date', 'timestamp')
-    content = content.replace('water_level_cm', 'level_cm')
-    content = content.replace('water_level_m', 'level_cm')
-    content = content.replace('predicted_level_cm', 'predicted_water_level_cm')
-    content = content.replace('predicted_water_level_cm', 'predicted_water_level_cm')
-    
-    with open('update_new_station_data.py', 'w') as f:
-        f.write(content)
-    
-    print("✅ Fixed update_new_station_data.py")
+    # Fix update_new_station_data.py (now in utilities folder)
+    print("🔧 Fixing utilities/update_new_station_data.py...")
+    try:
+        with open('utilities/update_new_station_data.py', 'r') as f:
+            content = f.read()
+        
+        # Fix all column name issues
+        content = content.replace('measurement_date', 'timestamp')
+        content = content.replace('water_level_cm', 'level_cm')
+        content = content.replace('water_level_m', 'level_cm')
+        content = content.replace('predicted_level_cm', 'predicted_water_level_cm')
+        content = content.replace('predicted_water_level_cm', 'predicted_water_level_cm')
+        
+        with open('utilities/update_new_station_data.py', 'w') as f:
+            f.write(content)
+        
+        print("✅ Fixed utilities/update_new_station_data.py")
+    except FileNotFoundError:
+        print("⚠️  utilities/update_new_station_data.py not found, skipping...")
 
 def fix_server_automatic_generation():
     """Fix server to include automatic data generation"""
