@@ -2,7 +2,6 @@
 import logging
 from flask import Flask
 from flask_cors import CORS
-from background_scheduler import start_background_scheduler
 from app.models.user import init_user_table, create_default_users
 
 
@@ -26,14 +25,10 @@ def create_app():
         init_user_table()
         create_default_users()
     
-    # Start background scheduler
-    print("\n" + "="*50)
-    print("🚀 STARTING BACKGROUND SCHEDULER...")
-    print("="*50)
-    print("🔧 Calling start_background_scheduler()...")
-    start_background_scheduler()
-    print("✅ Background scheduler call completed")
-    print("="*50)
+    # NOTE: Background scheduler should be run as a SEPARATE PROCESS
+    # when using gunicorn with multiple workers to avoid duplicate tasks.
+    # Use: python3 background_scheduler.py
+    # DO NOT start it here, or each worker will run its own scheduler!
     
     # Register blueprints
     from app.routes import auth_bp, stations_bp, municipalities_bp, predictions_bp, subscriptions_bp
