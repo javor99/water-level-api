@@ -326,7 +326,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         
         # Get all active subscriptions for this station
         cursor.execute("""
-            SELECT user_email, threshold_percentage
+            SELECT user_email, threshold_percentage, alert_type
             FROM station_subscriptions 
             WHERE station_id = ? AND is_active = 1
         """, (station_id,))
@@ -342,12 +342,24 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         for subscription in subscriptions:
             user_email = subscription['user_email']
             threshold_percentage = subscription['threshold_percentage']
+            alert_type = subscription.get('alert_type', 'above')  # Default to 'above' for backwards compatibility
+            
             # Calculate threshold as percentage between min and max
             threshold_level = min_level + (max_level - min_level) * threshold_percentage
             
-            # Check if prediction exceeds threshold
-            if current_prediction >= threshold_level:
-                print(f"     ALERT: {station_name} prediction ({current_prediction:.2f}cm) exceeds threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
+            # Check if alert condition is met based on alert_type
+            alert_triggered = False
+            if alert_type == 'above':
+                # Flood alert: prediction exceeds threshold
+                alert_triggered = current_prediction >= threshold_level
+                alert_msg = f"exceeds (above)"
+            elif alert_type == 'below':
+                # Drain/low water alert: prediction falls below threshold
+                alert_triggered = current_prediction <= threshold_level
+                alert_msg = f"falls below"
+            
+            if alert_triggered:
+                print(f"    🚨 ALERT ({alert_type.upper()}): {station_name} prediction ({current_prediction:.2f}cm) {alert_msg} threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
                 
                 # Send alert email
                 if send_water_level_alert(
@@ -357,7 +369,8 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
                     current_prediction=current_prediction,
                     min_level=min_level,
                     max_level=max_level,
-                    threshold_percentage=threshold_percentage
+                    threshold_percentage=threshold_percentage,
+                    alert_type=alert_type
                 ):
                     alerts_sent += 1
                     print(f"    📧 Alert email sent to {user_email}")

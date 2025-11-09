@@ -42,7 +42,7 @@ class EmailService:
         logger.info(f"📧 Default receivers: {', '.join(self.default_receivers)}")
 
     def send_water_level_alert(self, user_email, station_name, station_id, 
-                             current_prediction, min_level, max_level, threshold_percentage=0.9):
+                             current_prediction, min_level, max_level, threshold_percentage=0.9, alert_type='above'):
         """
         Send water level alert email to user and default receivers.
         
@@ -54,6 +54,7 @@ class EmailService:
             min_level (float): Minimum historical water level in cm
             max_level (float): Maximum historical water level in cm
             threshold_percentage (float): Alert threshold (default 0.9 = 90% between min and max)
+            alert_type (str): Type of alert - 'above' for flood alerts, 'below' for drain/low water alerts
         """
         if not self.enabled:
             logger.warning(f"📧 Email service disabled - would send alert to {user_email}")
@@ -67,22 +68,44 @@ class EmailService:
             all_recipients = list(set([user_email] + self.default_receivers))
             recipients_str = ', '.join(all_recipients)
             
+            # Customize subject and alert icon based on alert type
+            if alert_type == 'below':
+                alert_icon = "💧"  # Droplet for low water
+                alert_title = "LOW WATER ALERT"
+                bg_color = "#ff9800"  # Orange for drought/low water
+                subject = f"💧 Low Water Alert - {station_name}"
+            else:
+                alert_icon = "🚨"  # Siren for flood
+                alert_title = "WATER LEVEL ALERT"
+                bg_color = "#ff4444"  # Red for flood
+                subject = f"🚨 Water Level Alert - {station_name}"
+            
             # Create message
             msg = MIMEMultipart()
             msg['From'] = formataddr((self.from_name, self.from_email))
             msg['To'] = recipients_str
-            msg['Subject'] = f"🚨 Water Level Alert - {station_name}"
+            msg['Subject'] = subject
+            
+            # Customize warning message based on alert type
+            if alert_type == 'below':
+                warning_message = f"The predicted water level ({current_prediction:.2f} cm) has fallen below the alert threshold of {threshold_percentage*100:.0f}% between the minimum and maximum historical levels."
+                warning_icon = "💧"
+                comparison_text = "below"
+            else:
+                warning_message = f"The predicted water level ({current_prediction:.2f} cm) has exceeded the alert threshold of {threshold_percentage*100:.0f}% between the minimum and maximum historical levels."
+                warning_icon = "⚠️"
+                comparison_text = "above"
             
             # Create HTML email body
             body = f"""
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                <div style="background-color: #ff4444; color: white; padding: 20px; border-radius: 5px;">
-                    <h2 style="margin: 0;">🚨 WATER LEVEL ALERT 🚨</h2>
+                <div style="background-color: {bg_color}; color: white; padding: 20px; border-radius: 5px;">
+                    <h2 style="margin: 0;">{alert_icon} {alert_title} {alert_icon}</h2>
                 </div>
                 
                 <div style="padding: 20px; background-color: #f9f9f9; margin-top: 20px; border-radius: 5px;">
-                    <h3 style="color: #ff4444;">Station Information</h3>
+                    <h3 style="color: {bg_color};">Station Information</h3>
                     <table style="width: 100%; border-collapse: collapse;">
                         <tr>
                             <td style="padding: 8px; font-weight: bold;">Station:</td>
@@ -90,22 +113,25 @@ class EmailService:
                         </tr>
                         <tr>
                             <td style="padding: 8px; font-weight: bold;">Current Prediction:</td>
-                            <td style="padding: 8px;"><strong style="color: #ff4444;">{current_prediction:.2f} cm</strong></td>
+                            <td style="padding: 8px;"><strong style="color: {bg_color};">{current_prediction:.2f} cm</strong></td>
                         </tr>
                         <tr>
                             <td style="padding: 8px; font-weight: bold;">Historical Range:</td>
                             <td style="padding: 8px;">{min_level:.2f} cm (min) - {max_level:.2f} cm (max)</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px; font-weight: bold;">Alert Threshold:</td>
+                            <td style="padding: 8px; font-weight: bold;">Alert Threshold ({comparison_text}):</td>
                             <td style="padding: 8px;">{threshold_percentage*100:.0f}% between min and max = {threshold_level:.2f} cm</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px; font-weight: bold;">Alert Type:</td>
+                            <td style="padding: 8px;"><strong>{alert_type.upper()}</strong> ({'Flood Risk' if alert_type == 'above' else 'Low Water / Drain'})</td>
                         </tr>
                     </table>
                 </div>
                 
                 <div style="padding: 20px; background-color: #fff3cd; margin-top: 20px; border-left: 5px solid #ffa500; border-radius: 5px;">
-                    <p style="margin: 0;"><strong>⚠️ WARNING:</strong> The predicted water level ({current_prediction:.2f} cm) has exceeded 
-                    the alert threshold of {threshold_percentage*100:.0f}% between the minimum and maximum historical levels.</p>
+                    <p style="margin: 0;"><strong>{warning_icon} WARNING:</strong> {warning_message}</p>
                 </div>
                 
                 <div style="padding: 20px; margin-top: 20px;">
@@ -244,11 +270,11 @@ class EmailService:
 email_service = EmailService()
 
 def send_water_level_alert(user_email, station_name, station_id, 
-                          current_prediction, min_level, max_level, threshold_percentage=0.9):
+                          current_prediction, min_level, max_level, threshold_percentage=0.9, alert_type='above'):
     """Convenience function to send water level alert."""
     return email_service.send_water_level_alert(
         user_email, station_name, station_id, 
-        current_prediction, min_level, max_level, threshold_percentage
+        current_prediction, min_level, max_level, threshold_percentage, alert_type
     )
 
 def send_subscription_confirmation(user_email, station_name, station_id):
