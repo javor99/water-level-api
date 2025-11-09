@@ -308,20 +308,21 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         
         current_prediction = latest_prediction['predicted_water_level_cm']
         
-        # Get the maximum historical level for this station
+        # Get the min/max values from min_max_values table
         cursor.execute("""
-            SELECT MAX(level_cm) as max_level
-            FROM last_30_days_historical 
+            SELECT min_level_cm, max_level_cm
+            FROM min_max_values 
             WHERE station_id = ?
         """, (station_id,))
         
-        max_level_result = cursor.fetchone()
+        minmax_result = cursor.fetchone()
         
-        if not max_level_result or not max_level_result['max_level']:
+        if not minmax_result or not minmax_result['min_level_cm'] or not minmax_result['max_level_cm']:
             conn.close()
             return False
         
-        max_level = max_level_result['max_level']
+        min_level = minmax_result['min_level_cm']
+        max_level = minmax_result['max_level_cm']
         
         # Get all active subscriptions for this station
         cursor.execute("""
@@ -341,11 +342,12 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         for subscription in subscriptions:
             user_email = subscription['user_email']
             threshold_percentage = subscription['threshold_percentage']
-            threshold_level = max_level * threshold_percentage
+            # Calculate threshold as percentage between min and max
+            threshold_level = min_level + (max_level - min_level) * threshold_percentage
             
             # Check if prediction exceeds threshold
             if current_prediction >= threshold_level:
-                print(f"     ALERT: {station_name} prediction ({current_prediction:.2f}m) exceeds threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}m)")
+                print(f"     ALERT: {station_name} prediction ({current_prediction:.2f}cm) exceeds threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
                 
                 # Send alert email
                 if send_water_level_alert(
@@ -353,6 +355,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
                     station_name=station_name,
                     station_id=station_id,
                     current_prediction=current_prediction,
+                    min_level=min_level,
                     max_level=max_level,
                     threshold_percentage=threshold_percentage
                 ):

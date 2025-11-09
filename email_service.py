@@ -42,7 +42,7 @@ class EmailService:
         logger.info(f"📧 Default receivers: {', '.join(self.default_receivers)}")
 
     def send_water_level_alert(self, user_email, station_name, station_id, 
-                             current_prediction, max_level, threshold_percentage=0.9):
+                             current_prediction, min_level, max_level, threshold_percentage=0.9):
         """
         Send water level alert email to user and default receivers.
         
@@ -50,17 +50,18 @@ class EmailService:
             user_email (str): Recipient email address (also sent to default receivers)
             station_name (str): Name of the water level station
             station_id (str): Station ID
-            current_prediction (float): Current predicted water level
-            max_level (float): Maximum historical water level
-            threshold_percentage (float): Alert threshold (default 0.9 = 90%)
+            current_prediction (float): Current predicted water level in cm
+            min_level (float): Minimum historical water level in cm
+            max_level (float): Maximum historical water level in cm
+            threshold_percentage (float): Alert threshold (default 0.9 = 90% between min and max)
         """
         if not self.enabled:
             logger.warning(f"📧 Email service disabled - would send alert to {user_email}")
             return False
 
         try:
-            # Calculate threshold level
-            threshold_level = max_level * threshold_percentage
+            # Calculate threshold level as percentage between min and max
+            threshold_level = min_level + (max_level - min_level) * threshold_percentage
             
             # Combine recipients: user_email + default receivers
             all_recipients = list(set([user_email] + self.default_receivers))
@@ -89,22 +90,22 @@ class EmailService:
                         </tr>
                         <tr>
                             <td style="padding: 8px; font-weight: bold;">Current Prediction:</td>
-                            <td style="padding: 8px;"><strong style="color: #ff4444;">{current_prediction:.2f} meters</strong></td>
+                            <td style="padding: 8px;"><strong style="color: #ff4444;">{current_prediction:.2f} cm</strong></td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px; font-weight: bold;">Maximum Historical Level:</td>
-                            <td style="padding: 8px;">{max_level:.2f} meters</td>
+                            <td style="padding: 8px; font-weight: bold;">Historical Range:</td>
+                            <td style="padding: 8px;">{min_level:.2f} cm (min) - {max_level:.2f} cm (max)</td>
                         </tr>
                         <tr>
                             <td style="padding: 8px; font-weight: bold;">Alert Threshold:</td>
-                            <td style="padding: 8px;">{threshold_percentage*100:.0f}% ({threshold_level:.2f} meters)</td>
+                            <td style="padding: 8px;">{threshold_percentage*100:.0f}% between min and max = {threshold_level:.2f} cm</td>
                         </tr>
                     </table>
                 </div>
                 
                 <div style="padding: 20px; background-color: #fff3cd; margin-top: 20px; border-left: 5px solid #ffa500; border-radius: 5px;">
-                    <p style="margin: 0;"><strong>⚠️ WARNING:</strong> The predicted water level ({current_prediction:.2f}m) has exceeded 
-                    the alert threshold of {threshold_percentage*100:.0f}% of the maximum historical level.</p>
+                    <p style="margin: 0;"><strong>⚠️ WARNING:</strong> The predicted water level ({current_prediction:.2f} cm) has exceeded 
+                    the alert threshold of {threshold_percentage*100:.0f}% between the minimum and maximum historical levels.</p>
                 </div>
                 
                 <div style="padding: 20px; margin-top: 20px;">
@@ -243,11 +244,11 @@ class EmailService:
 email_service = EmailService()
 
 def send_water_level_alert(user_email, station_name, station_id, 
-                          current_prediction, max_level, threshold_percentage=0.9):
+                          current_prediction, min_level, max_level, threshold_percentage=0.9):
     """Convenience function to send water level alert."""
     return email_service.send_water_level_alert(
         user_email, station_name, station_id, 
-        current_prediction, max_level, threshold_percentage
+        current_prediction, min_level, max_level, threshold_percentage
     )
 
 def send_subscription_confirmation(user_email, station_name, station_id):
