@@ -344,8 +344,9 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         for subscription in subscriptions:
             user_email = subscription['user_email']
             threshold_percentage = subscription['threshold_percentage']
-            alert_type = subscription.get('alert_type', 'above')  # Default to 'above' for backwards compatibility
-            last_alert_sent_at = subscription.get('last_alert_sent_at')
+            # sqlite3.Row doesn't support .get(), use dict-style access with fallback
+            alert_type = subscription['alert_type'] if subscription['alert_type'] else 'above'
+            last_alert_sent_at = subscription['last_alert_sent_at'] if subscription['last_alert_sent_at'] else None
             
             # Calculate threshold as percentage between min and max
             threshold_level = min_level + (max_level - min_level) * threshold_percentage
