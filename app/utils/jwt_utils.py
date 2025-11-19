@@ -13,7 +13,7 @@ def generate_jwt_token(user_id: int, email: str, role: str) -> str:
         'email': email,
         'role': role,
         'iat': now,
-        'exp': now + timedelta(hours=JWT_EXPIRATION_HOURS)  # Token expires after 24 hours
+        'exp': now + timedelta(hours=JWT_EXPIRATION_HOURS)  # Token expires after ~100 years (effectively never)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm='HS256')
 

@@ -3,7 +3,8 @@ import os
 
 # Security - Fixed SECRET_KEY so tokens survive server restarts
 SECRET_KEY = os.environ.get('SECRET_KEY', 'water-level-api-secret-key-fixed-do-not-change-in-production')
-JWT_EXPIRATION_HOURS = 24
+# JWT token expiration: Set to 100 years (876000 hours) so tokens effectively never expire
+JWT_EXPIRATION_HOURS = 876000  # ~100 years - tokens never expire in practice
 
 # Database
 DB_PATH = "water_levels.db"
