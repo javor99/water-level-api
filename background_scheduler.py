@@ -324,15 +324,6 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         min_level = minmax_result['min_level_cm']
         max_level = minmax_result['max_level_cm']
         
-        # Ensure last_alert_sent_at column exists (for existing databases)
-        try:
-            cursor.execute("SELECT last_alert_sent_at FROM station_subscriptions LIMIT 1")
-        except sqlite3.OperationalError:
-            # Column doesn't exist, add it
-            cursor.execute("ALTER TABLE station_subscriptions ADD COLUMN last_alert_sent_at TIMESTAMP")
-            conn.commit()
-            print(f"    ✅ Added last_alert_sent_at column to station_subscriptions table")
-        
         # Get all active subscriptions for this station
         cursor.execute("""
             SELECT user_email, threshold_percentage, alert_type, last_alert_sent_at
