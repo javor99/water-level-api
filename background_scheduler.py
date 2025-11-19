@@ -288,6 +288,7 @@ def update_predictions_for_station(station_id: str, station_name: str, latitude:
 def check_and_send_alerts_for_station(station_id: str, station_name: str):
     """Check if predictions exceed threshold and send alerts to subscribers."""
     try:
+        print(f"    🔔 Checking alerts for {station_name} ({station_id})...")
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -303,6 +304,7 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         latest_prediction = cursor.fetchone()
         
         if not latest_prediction:
+            print(f"    ⚠️  No predictions found for {station_name} - skipping alert check")
             conn.close()
             return False
         
@@ -334,8 +336,11 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         subscriptions = cursor.fetchall()
         
         if not subscriptions:
+            print(f"    ℹ️  No active subscriptions for {station_name} - no alerts to check")
             conn.close()
             return False
+        
+        print(f"    📋 Found {len(subscriptions)} active subscription(s) for {station_name}")
         
         # Check each subscription and send alerts if needed
         alerts_sent = 0
