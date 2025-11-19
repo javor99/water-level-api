@@ -190,6 +190,7 @@ def init_all_tables():
             alert_type TEXT DEFAULT 'above',
             is_active BOOLEAN DEFAULT 1,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_alert_sent_at TIMESTAMP,
             PRIMARY KEY (user_email, station_id, alert_type)
         )
     ''')

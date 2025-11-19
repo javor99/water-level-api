@@ -324,25 +324,37 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
         min_level = minmax_result['min_level_cm']
         max_level = minmax_result['max_level_cm']
         
+        # Ensure last_alert_sent_at column exists (for existing databases)
+        try:
+            cursor.execute("SELECT last_alert_sent_at FROM station_subscriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            # Column doesn't exist, add it
+            cursor.execute("ALTER TABLE station_subscriptions ADD COLUMN last_alert_sent_at TIMESTAMP")
+            conn.commit()
+            print(f"    ✅ Added last_alert_sent_at column to station_subscriptions table")
+        
         # Get all active subscriptions for this station
         cursor.execute("""
-            SELECT user_email, threshold_percentage, alert_type
+            SELECT user_email, threshold_percentage, alert_type, last_alert_sent_at
             FROM station_subscriptions 
             WHERE station_id = ? AND is_active = 1
         """, (station_id,))
         
         subscriptions = cursor.fetchall()
-        conn.close()
         
         if not subscriptions:
+            conn.close()
             return False
         
         # Check each subscription and send alerts if needed
         alerts_sent = 0
+        now = datetime.now()
+        
         for subscription in subscriptions:
             user_email = subscription['user_email']
             threshold_percentage = subscription['threshold_percentage']
             alert_type = subscription.get('alert_type', 'above')  # Default to 'above' for backwards compatibility
+            last_alert_sent_at = subscription.get('last_alert_sent_at')
             
             # Calculate threshold as percentage between min and max
             threshold_level = min_level + (max_level - min_level) * threshold_percentage
@@ -359,23 +371,47 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
                 alert_msg = f"falls below"
             
             if alert_triggered:
-                print(f"    🚨 ALERT ({alert_type.upper()}): {station_name} prediction ({current_prediction:.2f}cm) {alert_msg} threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
+                # Check if 24 hours have passed since last alert (or if no alert was ever sent)
+                should_send_alert = True
+                if last_alert_sent_at:
+                    try:
+                        last_alert_time = datetime.strptime(last_alert_sent_at, '%Y-%m-%d %H:%M:%S')
+                        hours_since_last_alert = (now - last_alert_time).total_seconds() / 3600
+                        if hours_since_last_alert < 24:
+                            should_send_alert = False
+                            print(f"    ⏸️  Skipping alert to {user_email}: Last alert sent {hours_since_last_alert:.1f} hours ago (minimum 24h required)")
+                    except (ValueError, TypeError):
+                        # If date parsing fails, send alert anyway
+                        pass
                 
-                # Send alert email
-                if send_water_level_alert(
-                    user_email=user_email,
-                    station_name=station_name,
-                    station_id=station_id,
-                    current_prediction=current_prediction,
-                    min_level=min_level,
-                    max_level=max_level,
-                    threshold_percentage=threshold_percentage,
-                    alert_type=alert_type
-                ):
-                    alerts_sent += 1
-                    print(f"    📧 Alert email sent to {user_email}")
-                else:
-                    print(f"    ❌ Failed to send alert email to {user_email}")
+                if should_send_alert:
+                    print(f"    🚨 ALERT ({alert_type.upper()}): {station_name} prediction ({current_prediction:.2f}cm) {alert_msg} threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
+                    
+                    # Send alert email
+                    if send_water_level_alert(
+                        user_email=user_email,
+                        station_name=station_name,
+                        station_id=station_id,
+                        current_prediction=current_prediction,
+                        min_level=min_level,
+                        max_level=max_level,
+                        threshold_percentage=threshold_percentage,
+                        alert_type=alert_type
+                    ):
+                        # Update last_alert_sent_at timestamp
+                        cursor.execute("""
+                            UPDATE station_subscriptions 
+                            SET last_alert_sent_at = ?
+                            WHERE user_email = ? AND station_id = ? AND alert_type = ?
+                        """, (now.strftime('%Y-%m-%d %H:%M:%S'), user_email, station_id, alert_type))
+                        conn.commit()
+                        
+                        alerts_sent += 1
+                        print(f"    📧 Alert email sent to {user_email} (next alert in 24 hours)")
+                    else:
+                        print(f"    ❌ Failed to send alert email to {user_email}")
+        
+        conn.close()
         
         if alerts_sent > 0:
             print(f"    ✅ {alerts_sent} alert(s) sent for {station_name}")
