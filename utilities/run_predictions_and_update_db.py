@@ -18,13 +18,13 @@ import time
 
 def get_db_connection():
     """Create a database connection."""
-    conn = sqlite3.connect('water_levels.db')
+    conn = sqlite3.connect('../water_levels.db')
     conn.row_factory = sqlite3.Row
     return conn
 
 def load_station_coordinates():
     """Load station coordinates from JSON file."""
-    with open('station_coordinates.json', 'r') as f:
+    with open('../station_coordinates.json', 'r') as f:
         stations = json.load(f)
     return stations
 
@@ -42,7 +42,7 @@ def run_prediction_for_station(station_id, lat, lon, station_name):
         try:
             # Run the prediction script with current time window
             cmd = [
-                'python3', 'utilities/predict_unseen_station.py',
+                'python3', 'predict_unseen_station.py',
                 '--vandah_id', station_id,
                 '--lat', str(lat),
                 '--lon', str(lon),
@@ -82,7 +82,7 @@ def run_prediction_for_station(station_id, lat, lon, station_name):
 
 def save_predictions_to_db(station_id):
     """Save predictions from CSV file to database."""
-    csv_path = f'predictions/predictions_{station_id}_unseen.csv'
+            csv_path = f'../predictions/predictions_{station_id}_unseen.csv'
     
     if not os.path.exists(csv_path):
         print(f"  ⚠️  Prediction CSV not found: {csv_path}")

@@ -226,7 +226,7 @@ def run_predictions(station_id: str, station_name: str, latitude: float, longitu
         
         # Run the prediction script
         cmd = [
-            'python3', 'utilities/predict_unseen_station.py',
+            'python3', 'predict_unseen_station.py',
             '--vandah_id', station_id,
             '--lat', str(latitude),
             '--lon', str(longitude),
