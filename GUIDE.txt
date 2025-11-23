@@ -26,7 +26,7 @@ The system has three user roles with different permissions:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ ADMINS (admin)                                                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ • Must login with JWT token                                                  │
+│ • Must login                                                                 │
 │ • Assigned to ONE municipality by superadmin                                  │
 │ • Can:                                                                       │
 │   - Create and delete stations in their assigned municipality               │
@@ -39,9 +39,9 @@ The system has three user roles with different permissions:
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ SUPERADMINS (superadmin)                                                      │
+│ SUPERADMINS (superadmin)                                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ • Must login with JWT token                                                  │
+│ • Must login                                                                 │
 │ • Full system access                                                         │
 │ • Can:                                                                       │
 │   - Create and manage all users (admins, superadmins)                        │
@@ -51,10 +51,6 @@ The system has three user roles with different permissions:
 │   - Update min/max values for any station                                    │
 │   - Subscribe to alerts for any station                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
-
-Default Users (for testing):
-  • superadmin@superadmin.com / password: 12345678
-  • admin@admin.com / password: 12345678
 
 ================================================================================
 2. STATIONS (Water Level Monitoring Points)
@@ -70,7 +66,7 @@ STATION DATA SOURCES:
   - GPS coordinates (latitude, longitude)
   - Station name
   - Current water level
-  - Historical water level data (last 30 days)
+  - Historical water level data (last 40 days)
 
 • Open-Meteo API:
   - Weather data (temperature, humidity, pressure, wind, rainfall)
@@ -85,7 +81,7 @@ STATION DATA SOURCES:
 STATION FEATURES:
 ──────────────────
 • Current Water Level: Latest measured water level
-• Historical Data: Last 30 days of daily averaged water levels
+• Historical Data: Last 40 days of daily averaged water levels
 • Predictions: 7-day forecast (updated every 6 hours)
 • Min/Max Values: Editable historical range (used for alert thresholds)
   - Min: Lowest historical value (default: calculated from 5-year data)
@@ -101,7 +97,7 @@ PREDICTION UPDATES:
   2. Fetches weather data for station coordinates
   3. Runs ML model to generate 7-day predictions
   4. Saves predictions to database
-  5. Checks subscriptions and sends alerts if thresholds crossed
+  5. Checks subscriptions and sends alerts if thresholds crossed (once per day)
 
 ================================================================================
 3. MUNICIPALITIES
@@ -120,7 +116,7 @@ MUNICIPALITY ATTRIBUTES:
 MUNICIPALITY MANAGEMENT:
 ────────────────────────
 • Created by: Superadmins only
-• Stations: Assigned to municipalities by superadmins
+• Stations: Assigned to municipalities by superadmins and admins
 • Admins: Assigned to municipalities by superadmins
 • Each admin can only manage stations in their assigned municipality
 
