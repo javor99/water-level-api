@@ -59,7 +59,5 @@ ngrok.log
 url
 
 # Predictions folder (auto-generated CSV/JSON files)
-predictions/
-*.csv
-*.json
-!requirements.txt
+predictions/*.csv
+predictions/*.json
