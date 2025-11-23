@@ -169,7 +169,7 @@ def update_predictions_for_station(station_id: str, station_name: str, latitude:
         
         # Run the prediction script
         cmd = [
-            'python3', 'predict_unseen_station.py',
+            'python3', 'utilities/predict_unseen_station.py',
             '--vandah_id', station_id,
             '--lat', str(latitude),
             '--lon', str(longitude),

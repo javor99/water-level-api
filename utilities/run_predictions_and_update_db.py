@@ -42,7 +42,7 @@ def run_prediction_for_station(station_id, lat, lon, station_name):
         try:
             # Run the prediction script with current time window
             cmd = [
-                'python3', 'predict_unseen_station.py',
+                'python3', 'utilities/predict_unseen_station.py',
                 '--vandah_id', station_id,
                 '--lat', str(lat),
                 '--lon', str(lon),
