@@ -16,7 +16,7 @@ import subprocess
 from datetime import datetime, timedelta
 import requests
 import pandas as pd
-from email_service import send_water_level_alert
+from services.email_service import send_water_level_alert
 
 def get_db_connection():
     """Create a database connection."""

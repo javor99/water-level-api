@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify
 from app.middleware.auth import require_auth
 from app.utils.database import get_db_connection
 from app.utils.jwt_utils import verify_jwt_token
-from email_service import send_subscription_confirmation
+from services.email_service import send_subscription_confirmation
 import logging
 import threading
 

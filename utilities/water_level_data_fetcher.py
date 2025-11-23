@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from email_service import send_water_level_alert, send_subscription_confirmation
+from services.email_service import send_water_level_alert, send_subscription_confirmation
 
 class WaterLevelDataFetcher:
     def __init__(self, api_base_url="https://6fe4a9afdb88.ngrok-free.app", db_path="../water_levels.db"):
