@@ -12,7 +12,7 @@ import time
 
 # Import your existing modules
 try:
-    from email_service import send_water_level_alert, send_subscription_confirmation
+    from services.email_service import send_water_level_alert, send_subscription_confirmation
 except ImportError:
     # Fallback if email service not available
     def send_water_level_alert(*args, **kwargs):
