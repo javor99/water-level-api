@@ -9,10 +9,13 @@ import sqlite3
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from email_service import send_water_level_alert, send_subscription_confirmation
 
 class WaterLevelDataFetcher:
-    def __init__(self, api_base_url="https://6fe4a9afdb88.ngrok-free.app", db_path="water_levels.db"):
+    def __init__(self, api_base_url="https://6fe4a9afdb88.ngrok-free.app", db_path="../water_levels.db"):
         self.api_base_url = api_base_url
         self.db_path = db_path
         self.token = None
