@@ -1,0 +1,309 @@
+================================================================================
+                    WATER LEVEL MONITORING SYSTEM GUIDE
+================================================================================
+
+This guide explains how the Water Level Monitoring and Prediction API works.
+
+================================================================================
+1. USERS & ROLES
+================================================================================
+
+The system has three user roles with different permissions:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ REGULAR USERS (user)                                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • No login required                                                          │
+│ • Can view:                                                                   │
+│   - All stations and their data                                              │
+│   - Current water levels                                                     │
+│   - Predictions (7-day forecasts)                                            │
+│ • Cannot:                                                                    │
+│   - Create or modify stations                                                │
+│   - Subscribe to alerts                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ADMINS (admin)                                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • Must login with JWT token                                                  │
+│ • Assigned to ONE municipality by superadmin                                  │
+│ • Can:                                                                       │
+│   - Create and delete stations in their assigned municipality               │
+│   - Update min/max values for stations in their municipality                │
+│   - Subscribe to alerts for any station                                     │
+│ • Cannot:                                                                    │
+│   - Create municipalities                                                    │
+│   - Manage users                                                             │
+│   - Access stations outside their municipality                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ SUPERADMINS (superadmin)                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • Must login with JWT token                                                  │
+│ • Full system access                                                         │
+│ • Can:                                                                       │
+│   - Create and manage all users (admins, superadmins)                        │
+│   - Assign municipalities to admins                                          │
+│   - Create and manage all municipalities                                     │
+│   - Create and manage all stations                                           │
+│   - Update min/max values for any station                                    │
+│   - Subscribe to alerts for any station                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Default Users (for testing):
+  • superadmin@superadmin.com / password: 12345678
+  • admin@admin.com / password: 12345678
+
+================================================================================
+2. STATIONS (Water Level Monitoring Points)
+================================================================================
+
+Stations are water level monitoring points that track water levels in streams,
+rivers, and other water bodies.
+
+STATION DATA SOURCES:
+─────────────────────
+• Vandah API (vandah.miljoeportal.dk):
+  - Station ID (Vandah ID)
+  - GPS coordinates (latitude, longitude)
+  - Station name
+  - Current water level
+  - Historical water level data (last 30 days)
+
+• Open-Meteo API:
+  - Weather data (temperature, humidity, pressure, wind, rainfall)
+  - Fetched using station GPS coordinates
+  - Provides most precise measurement for the area
+
+• Machine Learning Model:
+  - Uses past 40 days of water level + weather data
+  - Generates 7-day water level predictions
+  - Model: Transformer-based neural network
+
+STATION FEATURES:
+──────────────────
+• Current Water Level: Latest measured water level
+• Historical Data: Last 30 days of daily averaged water levels
+• Predictions: 7-day forecast (updated every 6 hours)
+• Min/Max Values: Editable historical range (used for alert thresholds)
+  - Min: Lowest historical value (default: calculated from 5-year data)
+  - Max: Highest historical value (default: calculated from 5-year data)
+  - Can be manually adjusted by admins/superadmins
+
+PREDICTION UPDATES:
+────────────────────
+• Predictions are automatically updated every 6 hours
+• Background scheduler runs: 00:00, 06:00, 12:00, 18:00 (approximately)
+• Each update:
+  1. Fetches latest water level data (last 40 days)
+  2. Fetches weather data for station coordinates
+  3. Runs ML model to generate 7-day predictions
+  4. Saves predictions to database
+  5. Checks subscriptions and sends alerts if thresholds crossed
+
+================================================================================
+3. MUNICIPALITIES
+================================================================================
+
+Municipalities are administrative divisions that group stations together.
+
+MUNICIPALITY ATTRIBUTES:
+─────────────────────────
+• ID: Unique identifier
+• Name: Municipality name
+• Population: Number of residents
+• Area: Geometric area (km²)
+• Description: Additional information
+
+MUNICIPALITY MANAGEMENT:
+────────────────────────
+• Created by: Superadmins only
+• Stations: Assigned to municipalities by superadmins
+• Admins: Assigned to municipalities by superadmins
+• Each admin can only manage stations in their assigned municipality
+
+================================================================================
+4. SUBSCRIPTIONS & ALERTS
+================================================================================
+
+Users with accounts (admins/superadmins) can subscribe to receive email alerts
+when water levels cross specified thresholds.
+
+ALERT TYPES:
+────────────
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ABOVE (Flood Alerts) 🚨                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • Triggers when: prediction >= threshold                                     │
+│ • Use case: High water levels, flooding warnings                            │
+│ • Example: 90% threshold = alert when water reaches 90% between min and max │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ BELOW (Drain/Low Water Alerts) 💧                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ • Triggers when: prediction <= threshold                                     │
+│ • Use case: Low water levels, drought warnings                              │
+│ • Example: 10% threshold = alert when water falls to 10% between min and max │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+THRESHOLD CALCULATION:
+──────────────────────
+The threshold is calculated as a percentage BETWEEN min and max values:
+
+    threshold = min + (max - min) × threshold_percentage
+
+Example:
+  • Min: 100 cm
+  • Max: 200 cm
+  • Threshold: 90% (0.9)
+  • Calculated threshold: 100 + (200 - 100) × 0.9 = 190 cm
+  
+  For 'above' alert: Triggers when prediction ≥ 190 cm
+  For 'below' alert: Triggers when prediction ≤ 190 cm
+
+SUBSCRIPTION PROCESS:
+─────────────────────
+1. User logs in and gets JWT token
+2. User subscribes via API:
+   POST /stations/<station_id>/subscribe
+   {
+     "threshold_percentage": 0.9,  // 90% between min and max
+     "alert_type": "above"          // or "below"
+   }
+3. System saves subscription to database
+4. Confirmation email sent to user
+
+ALERT CHECKING:
+───────────────
+• Runs automatically every 6 hours (after predictions are updated)
+• For each station with active subscriptions:
+  1. Gets latest prediction
+  2. Gets min/max values for station
+  3. Calculates threshold
+  4. Checks if threshold is crossed
+  5. Checks if 24 hours passed since last alert
+  6. If yes → sends email alert
+  7. Updates last_alert_sent_at timestamp
+
+RATE LIMITING:
+──────────────
+• Maximum 1 alert per day per subscription
+• Even if threshold remains crossed, user receives max 1 email per 24 hours
+• Prevents email spam
+• Each alert type ('above'/'below') has separate rate limiting
+
+MULTIPLE SUBSCRIPTIONS:
+───────────────────────
+A user can subscribe to the same station with BOTH alert types:
+  • 'above' with 90% threshold (flood alert)
+  • 'below' with 10% threshold (low water alert)
+Each subscription is tracked separately with its own rate limiting.
+
+================================================================================
+5. API ENDPOINTS
+================================================================================
+
+AUTHENTICATION:
+───────────────
+POST /auth/login
+  Body: { "email": "...", "password": "..." }
+  Returns: JWT token (valid for ~100 years, effectively never expires)
+
+STATIONS:
+─────────
+GET  /stations                    - List all stations (no auth)
+GET  /stations/<id>                - Get station details (no auth)
+POST /stations                     - Create station (admin, requires auth)
+DELETE /stations/<id>              - Delete station (admin, requires auth)
+GET  /stations/<id>/minmax          - Get min/max values (no auth)
+POST /stations/<id>/minmax         - Update min/max (admin, requires auth)
+
+PREDICTIONS:
+────────────
+GET /predictions                   - Get all predictions (no auth)
+GET /predictions/<id>               - Get station predictions (no auth)
+GET /past-predictions/<id>          - Get historical predictions (no auth)
+
+SUBSCRIPTIONS:
+──────────────
+POST /stations/<id>/subscribe       - Subscribe to alerts (requires auth)
+POST /stations/<id>/unsubscribe     - Unsubscribe from alerts (requires auth)
+GET  /subscriptions                 - Get my subscriptions (requires auth)
+
+MUNICIPALITIES:
+───────────────
+GET  /municipalities                - List all municipalities (no auth)
+POST /municipalities                - Create municipality (superadmin)
+POST /municipalities/<id>/stations  - Assign stations (superadmin)
+
+================================================================================
+6. SYSTEM ARCHITECTURE
+================================================================================
+
+PRODUCTION DEPLOYMENT:
+──────────────────────
+The system runs with two separate processes:
+
+1. Background Scheduler (background_scheduler.py)
+   • Runs every 6 hours
+   • Updates: 30-day history, current water levels, predictions
+   • Checks subscriptions and sends alerts
+   • Runs as separate process (not in Flask workers)
+
+2. Web Server (Gunicorn + Flask)
+   • 4 workers handling API requests
+   • Serves REST API endpoints
+   • Port: 5001
+
+Start both services:
+  ./start_all_production.sh
+
+Stop both services:
+  ./stop_production.sh
+
+FOLDER STRUCTURE:
+─────────────────
+app/              - Flask application code (routes, models, middleware)
+services/         - Core services (email_service.py)
+utilities/        - Utility scripts (predictions, data fetching)
+migrations/       - Database migration scripts
+predictions/      - Temporary prediction CSV files (auto-generated, git-ignored)
+
+================================================================================
+7. TECHNICAL DETAILS
+================================================================================
+
+DATABASE:
+─────────
+• SQLite database: water_levels.db
+• Tables:
+  - users: User accounts and roles
+  - municipalities: Administrative divisions
+  - stations: Water level monitoring points
+  - water_levels: Current water levels
+  - last_30_days_historical: Historical water level data
+  - predictions: 7-day forecasts
+  - past_predictions: Historical prediction records
+  - station_subscriptions: User alert subscriptions
+  - min_max_values: Editable min/max ranges for stations
+
+EMAIL SERVICE:
+─────────────
+• SMTP Server: smtp.ait.dtu.dk (port 25)
+• No authentication required
+• Sends to: user_email + default receivers
+• Default receivers: aquamonitor@dtu.dk, s232467@student.dtu.dk
+
+MACHINE LEARNING:
+─────────────────
+• Model: Transformer neural network
+• Input: 40 days of water level + weather data
+• Output: 7-day water level predictions
+• Model file: models/transformer_h512_L2_seq40--*.pth
+
+================================================================================
+END OF GUIDE
+================================================================================
