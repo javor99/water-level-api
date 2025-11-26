@@ -21,9 +21,11 @@ import os
 import sys
 import json
 import argparse
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
+from requests.exceptions import RequestException, Timeout, ConnectionError as RequestsConnectionError
 import numpy as np
 import pandas as pd
 import torch
@@ -205,8 +207,11 @@ def check_and_fill_missing_days(daily_df: pd.DataFrame, max_missing: int = 3,
     return result_df
 
 
-def fetch_water_daily(vandah_station_id: str, past_days: int) -> pd.DataFrame:
-    """Vandah 15-min → daily mean (cm); columns: date, water_level_cm."""
+def fetch_water_daily(vandah_station_id: str, past_days: int, max_retries: int = 5) -> pd.DataFrame:
+    """
+    Vandah 15-min → daily mean (cm); columns: date, water_level_cm.
+    Includes exponential backoff retry logic for API failures.
+    """
     to_time = datetime.now(timezone.utc).replace(microsecond=0)
     from_time = to_time - timedelta(days=past_days)
 
@@ -217,22 +222,75 @@ def fetch_water_daily(vandah_station_id: str, past_days: int) -> pd.DataFrame:
         "to":   to_time.strftime("%Y-%m-%dT%H:%MZ"),
         "format": "json",
     }
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    raw = r.json()
-    with open(OUT_RAW_WATER, "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False, indent=2)
+    
+    # Retryable HTTP status codes
+    retryable_status_codes = {403, 500, 502, 503, 504}
+    
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            
+            # If successful, process and return data
+            if r.status_code == 200:
+                raw = r.json()
+                with open(OUT_RAW_WATER, "w", encoding="utf-8") as f:
+                    json.dump(raw, f, ensure_ascii=False, indent=2)
 
-    if not raw or not raw[0].get("results"):
-        raise RuntimeError("No water level data returned from Vandah")
+                if not raw or not raw[0].get("results"):
+                    raise RuntimeError("No water level data returned from Vandah")
 
-    recs = raw[0]["results"]
-    df = pd.DataFrame({
-        "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
-        "water_level_cm": [rr["result"] for rr in recs],
-    })
-    df["date"] = df["dt"].dt.date
-    daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
+                recs = raw[0]["results"]
+                df = pd.DataFrame({
+                    "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
+                    "water_level_cm": [rr["result"] for rr in recs],
+                })
+                df["date"] = df["dt"].dt.date
+                daily = df.groupby("date", as_index=False)["water_level_cm"].mean()
+                
+                if attempt > 0:
+                    print(f"✅ Successfully fetched data for {vandah_station_id} after {attempt} retry(ies)")
+                return daily
+            
+            # Check if status code is retryable
+            elif r.status_code in retryable_status_codes:
+                if attempt < max_retries - 1:
+                    # Calculate exponential backoff: 2^attempt seconds, max 30 seconds
+                    wait_time = min(2 ** attempt, 30)
+                    print(f"⚠️  API returned {r.status_code} for {vandah_station_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    r.raise_for_status()  # Raise exception on final attempt
+            else:
+                # Non-retryable status code, raise immediately
+                r.raise_for_status()
+                
+        except (Timeout, RequestsConnectionError) as e:
+            # Network errors - retry with exponential backoff
+            if attempt < max_retries - 1:
+                wait_time = min(2 ** attempt, 30)
+                print(f"⚠️  Network error for {vandah_station_id} ({type(e).__name__}), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            else:
+                raise RuntimeError(f"Failed to fetch water data for {vandah_station_id} after {max_retries} attempts: {e}")
+                
+        except RequestException as e:
+            # Other request errors - retry if retryable status code
+            if hasattr(e.response, 'status_code') and e.response.status_code in retryable_status_codes:
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 30)
+                    print(f"⚠️  Request error for {vandah_station_id} (HTTP {e.response.status_code}), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError(f"Failed to fetch water data for {vandah_station_id} after {max_retries} attempts: {e}")
+            else:
+                # Non-retryable error, fail immediately
+                raise
+    
+    # If we exhausted all retries
+    raise RuntimeError(f"Failed to fetch water data for {vandah_station_id} after {max_retries} attempts")
     
     # STEP 1: Check total missing days including gap to today
     daily['date'] = pd.to_datetime(daily['date'])

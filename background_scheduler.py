@@ -3,8 +3,8 @@
 
 """
 Background Scheduler for Water Level System
-Automatically updates 30-day history and predictions for all stations every 6 hours.
-Enhanced with detailed logging.
+Automatically updates 30-day history and predictions for all stations every 2 hours.
+Enhanced with detailed logging and exponential backoff retry logic.
 """
 
 import os
@@ -15,6 +15,7 @@ import time
 import subprocess
 from datetime import datetime, timedelta
 import requests
+from requests.exceptions import RequestException, Timeout, ConnectionError as RequestsConnectionError
 import pandas as pd
 from services.email_service import send_water_level_alert
 
@@ -39,8 +40,18 @@ def get_all_stations():
     conn.close()
     return stations
 
-def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
-    """Fetch daily water level data for a station from Vandah API."""
+def fetch_water_daily(station_id: str, past_days: int, max_retries: int = 5) -> pd.DataFrame:
+    """
+    Fetch daily water level data for a station from Vandah API with exponential backoff retry.
+    
+    Args:
+        station_id: Station ID to fetch data for
+        past_days: Number of days of historical data to fetch
+        max_retries: Maximum number of retry attempts (default: 5)
+    
+    Returns:
+        DataFrame with daily water level data, or empty DataFrame on failure
+    """
     to_time = datetime.now().replace(microsecond=0)
     from_time = to_time - timedelta(days=past_days)
 
@@ -52,26 +63,81 @@ def fetch_water_daily(station_id: str, past_days: int) -> pd.DataFrame:
         "format": "json",
     }
     
-    try:
-        r = requests.get(url, params=params, timeout=30)
-        r.raise_for_status()
-        raw = r.json()
+    # Retryable HTTP status codes
+    retryable_status_codes = {403, 500, 502, 503, 504}
+    
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            
+            # If successful, process and return data
+            if r.status_code == 200:
+                raw = r.json()
+                
+                if not raw or not raw[0].get("results"):
+                    return pd.DataFrame()
 
-        if not raw or not raw[0].get("results"):
+                recs = raw[0]["results"]
+                df = pd.DataFrame({
+                    "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
+                    "level_cm": [rr["result"] for rr in recs],
+                })
+                df["date"] = df["dt"].dt.date
+                daily = df.groupby("date", as_index=False)["level_cm"].mean()
+                
+                if attempt > 0:
+                    print(f"    ✅ Successfully fetched data for {station_id} after {attempt} retry(ies)")
+                return daily
+            
+            # Check if status code is retryable
+            elif r.status_code in retryable_status_codes:
+                if attempt < max_retries - 1:
+                    # Calculate exponential backoff: 2^attempt seconds, max 30 seconds
+                    wait_time = min(2 ** attempt, 30)
+                    print(f"    ⚠️  API returned {r.status_code} for {station_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    r.raise_for_status()  # Raise exception on final attempt
+            else:
+                # Non-retryable status code, raise immediately
+                r.raise_for_status()
+                
+        except (Timeout, RequestsConnectionError) as e:
+            # Network errors - retry with exponential backoff
+            if attempt < max_retries - 1:
+                wait_time = min(2 ** attempt, 30)
+                print(f"    ⚠️  Network error for {station_id} ({type(e).__name__}), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+                continue
+            else:
+                print(f"    ❌ Error fetching water data for {station_id} after {max_retries} attempts: {e}")
+                return pd.DataFrame()
+                
+        except RequestException as e:
+            # Other request errors - retry if retryable status code
+            if hasattr(e.response, 'status_code') and e.response.status_code in retryable_status_codes:
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 30)
+                    print(f"    ⚠️  Request error for {station_id} (HTTP {e.response.status_code}), retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"    ❌ Error fetching water data for {station_id} after {max_retries} attempts: {e}")
+                    return pd.DataFrame()
+            else:
+                # Non-retryable error, fail immediately
+                print(f"    ❌ Error fetching water data for {station_id}: {e}")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            # Unexpected errors - don't retry
+            print(f"    ❌ Unexpected error fetching water data for {station_id}: {e}")
             return pd.DataFrame()
-
-        recs = raw[0]["results"]
-        df = pd.DataFrame({
-            "dt": pd.to_datetime([rr["measurementDateTime"] for rr in recs], utc=True),
-            "level_cm": [rr["result"] for rr in recs],
-        })
-        df["date"] = df["dt"].dt.date
-        daily = df.groupby("date", as_index=False)["level_cm"].mean()
-        return daily
-        
-    except Exception as e:
-        print(f"    ❌ Error fetching water data for {station_id}: {e}")
-        return pd.DataFrame()
+    
+    # If we exhausted all retries
+    print(f"    ❌ Failed to fetch water data for {station_id} after {max_retries} attempts")
+    return pd.DataFrame()
 
 def update_30_day_history_for_station(station_id: str, station_name: str):
     """Update 30-day historical data for a single station."""
@@ -477,7 +543,7 @@ def update_all_stations():
           f"{results['predictions']}/{total_stations} predictions")
 
 def background_scheduler():
-    """Background scheduler that runs every 6 hours."""
+    """Background scheduler that runs every 2 hours."""
     # Create log file for background scheduler
     log_file = open("background_scheduler.log", "a")
     
@@ -488,8 +554,8 @@ def background_scheduler():
         log_file.write(log_line)
         log_file.flush()
     
-    log_message("🚀 Background scheduler started - updating every 6 hours")
-    log_message("📅 Next update scheduled in 6 hours...")
+    log_message("🚀 Background scheduler started - updating every 2 hours")
+    log_message("📅 Next update scheduled in 2 hours...")
     
     while True:
         try:
@@ -499,8 +565,8 @@ def background_scheduler():
         except Exception as e:
             print(f"❌ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in background scheduler: {e}")
         
-        # Wait 6 hours (21600 seconds)
-        time.sleep(21600)
+        # Wait 2 hours (7200 seconds)
+        time.sleep(7200)
 
 def start_background_scheduler():
     """Start the background scheduler in a separate thread."""
@@ -509,7 +575,7 @@ def start_background_scheduler():
     thread.daemon = True
     thread.start()
     print("✅ Background scheduler thread started successfully")
-    print("📝 Background scheduler will log to console every 6 hours")
+    print("📝 Background scheduler will log to console every 2 hours")
     print("🔄 First update cycle will start immediately...")
 
 if __name__ == "__main__":
