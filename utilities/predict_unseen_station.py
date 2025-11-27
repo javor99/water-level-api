@@ -37,9 +37,9 @@ import torch
 REPO_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, REPO_DIR)
 
-MODEL_PATH = os.path.join(REPO_DIR, "../models/transformer_h512_L2_seq40--Borup_Bygholm_Gesager_Himmelev_Hoven_Karstoft_Kirkea_Ledreborg_Mollebaek_Sengelose_train_Skjern.pth")
+MODEL_PATH = os.path.join(REPO_DIR, "models/transformer_h512_L2_seq40--Borup_Bygholm_Gesager_Himmelev_Hoven_Karstoft_Kirkea_Ledreborg_Mollebaek_Sengelose_train_Skjern.pth")
 
-OUT_DIR = "../predictions"
+OUT_DIR = os.path.join(REPO_DIR, "predictions")
 os.makedirs(OUT_DIR, exist_ok=True)
 OUT_RAW_WEATHER = os.path.join(OUT_DIR, "raw_weather_data.json")
 OUT_RAW_WATER   = os.path.join(OUT_DIR, "raw_water_data.json")
@@ -47,7 +47,8 @@ OUT_CSV_WEATHER = os.path.join(OUT_DIR, "processed_weather_data.csv")
 OUT_CSV_WATER   = os.path.join(OUT_DIR, "processed_water_data.csv")
 
 # ---------- import your training helpers ----------
-sys.path.insert(0, os.path.join(REPO_DIR, "../Data and code from Florian"))
+florian_dir = os.path.join(REPO_DIR, "Data and code from Florian")
+sys.path.insert(0, florian_dir)
 from Trainer import (  # feature processing & scaling parity with training
     process_features,          # adds season_sin/cos; returns df_proc, feature_cols
     categorize_features,       # per-feature-type categorization
