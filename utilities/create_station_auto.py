@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
+
 """
 Create a new station with automatic metadata fetching from Vandah API
 """

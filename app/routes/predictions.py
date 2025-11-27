@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
+
 """Prediction and water level routes."""
 from flask import Blueprint, jsonify
 from app.utils.database import get_db_connection

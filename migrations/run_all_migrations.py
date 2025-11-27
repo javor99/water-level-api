@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
+
 """
 Run all pending database migrations in order.
 

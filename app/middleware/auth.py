@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
+
 """Authentication middleware decorators."""
 from functools import wraps
 from flask import request, jsonify

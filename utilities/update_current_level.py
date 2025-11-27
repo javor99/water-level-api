@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
+
 def update_current_water_level(station_id: str, station_name: str) -> bool:
     """Update current water level with the most recent measurement from 30-day history."""
     try:

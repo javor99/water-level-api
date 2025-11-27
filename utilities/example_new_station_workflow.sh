@@ -1,5 +1,7 @@
 #!/bin/bash
-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2025 AquaMonitor/InnoTech-TaskForce
+# Part of AquaMonitor/InnoTech-TaskForce. See LICENSE for license terms.
 # Example workflow for adding a new water level station and updating its data
 
 echo "🚀 NEW STATION WORKFLOW EXAMPLE"
