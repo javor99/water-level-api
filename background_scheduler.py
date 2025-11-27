@@ -425,6 +425,13 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
             # Calculate threshold as percentage between min and max
             threshold_level = min_level + (max_level - min_level) * threshold_percentage
             
+            # Debug logging
+            print(f"    🔍 Subscription: {user_email}")
+            print(f"    🔍   Alert type: {alert_type}")
+            print(f"    🔍   Threshold: {threshold_percentage*100:.0f}% = {threshold_level:.2f}cm")
+            print(f"    🔍   Current prediction: {current_prediction:.2f}cm")
+            print(f"    🔍   Min level: {min_level:.2f}cm, Max level: {max_level:.2f}cm")
+            
             # Check if alert condition is met based on alert_type
             alert_triggered = False
             if alert_type == 'above':
@@ -435,6 +442,9 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
                 # Drain/low water alert: prediction falls below threshold
                 alert_triggered = current_prediction <= threshold_level
                 alert_msg = f"falls below"
+            
+            if not alert_triggered:
+                print(f"    ℹ️  Alert condition NOT met for {user_email}: {current_prediction:.2f}cm does not {alert_msg} {threshold_level:.2f}cm")
             
             if alert_triggered:
                 # Check if 24 hours have passed since last alert (or if no alert was ever sent)
@@ -531,14 +541,16 @@ def update_all_stations():
             print(f"    ❌ Current water level update failed")
         
         # Update predictions
-        if update_predictions_for_station(station_id, station_name, latitude, longitude):
+        predictions_updated = update_predictions_for_station(station_id, station_name, latitude, longitude)
+        if predictions_updated:
             results['predictions'] += 1
             print(f"    ✅ Predictions updated")
-            
-            # Check for alerts after successful prediction update
-            check_and_send_alerts_for_station(station_id, station_name)
         else:
             print(f"    ❌ Predictions update failed")
+        
+        # Check for alerts regardless of prediction update success/failure
+        # (uses latest prediction in database, even if update failed)
+        check_and_send_alerts_for_station(station_id, station_name)
     
     print(f"✅ Update completed at {datetime.now()}")
     print(f"  📈 Results: {results['30_day_history']}/{total_stations} history, "
