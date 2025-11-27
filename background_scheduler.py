@@ -451,14 +451,21 @@ def check_and_send_alerts_for_station(station_id: str, station_name: str):
                 should_send_alert = True
                 if last_alert_sent_at:
                     try:
-                        last_alert_time = datetime.strptime(last_alert_sent_at, '%Y-%m-%d %H:%M:%S')
+                        print(f"    🔍   Last alert timestamp (raw): '{last_alert_sent_at}' (type: {type(last_alert_sent_at).__name__})")
+                        last_alert_time = datetime.strptime(str(last_alert_sent_at), '%Y-%m-%d %H:%M:%S')
                         hours_since_last_alert = (now - last_alert_time).total_seconds() / 3600
+                        print(f"    🔍   Parsed timestamp: {last_alert_time}, Current time: {now}, Hours since: {hours_since_last_alert:.2f}")
                         if hours_since_last_alert < 24:
                             should_send_alert = False
                             print(f"    ⏸️  Skipping alert to {user_email}: Last alert sent {hours_since_last_alert:.1f} hours ago (minimum 24h required)")
-                    except (ValueError, TypeError):
+                        else:
+                            print(f"    ✅ 24+ hours have passed since last alert - will send")
+                    except (ValueError, TypeError) as e:
                         # If date parsing fails, send alert anyway
-                        pass
+                        print(f"    ⚠️  Failed to parse last_alert_sent_at '{last_alert_sent_at}': {e} - will send alert anyway")
+                        should_send_alert = True
+                else:
+                    print(f"    ✅  No previous alert sent - will send")
                 
                 if should_send_alert:
                     print(f"    🚨 ALERT ({alert_type.upper()}): {station_name} prediction ({current_prediction:.2f}cm) {alert_msg} threshold ({threshold_percentage*100:.0f}% = {threshold_level:.2f}cm)")
